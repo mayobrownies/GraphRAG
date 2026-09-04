@@ -1,2 +1,0 @@
-# GraphRAG
-KSU Senior Project
