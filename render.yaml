@@ -16,15 +16,15 @@ services:
       - key: CORS_ORIGINS
         sync: false
       - key: NEO4J_URI
-        sync: false
+        value: "neo4j+s://c025f2aa.databases.neo4j.io"
       - key: NEO4J_USERNAME
-        sync: false
+        value: "c025f2aa"
       - key: NEO4J_PASSWORD
         sync: false
       - key: NEO4J_DATABASE
-        value: neo4j
+        value: "c025f2aa"
       - key: QDRANT_URL
-        sync: false
+        value: "https://e8db2ed7-a36b-4397-b483-16dd11f259b7.us-east-1-1.aws.cloud.qdrant.io"
       - key: QDRANT_API_KEY
         sync: false
       - key: QDRANT_COLLECTION
@@ -32,8 +32,18 @@ services:
       - key: OLLAMA_BASE_URL
         sync: false
       - key: OLLAMA_LLM_MODEL
-        value: llama3.1
+        value: qwen3.5:0.8b
       - key: OLLAMA_EMBED_MODEL
-        value: nomic-embed-text
+        value: qwen3-embedding:0.6b
+      - key: SUPABASE_URL
+        value: "https://frskupfolawcdnjcsrsk.supabase.co"
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_JWKS_URL
+        value: "https://frskupfolawcdnjcsrsk.supabase.co/auth/v1/.well-known/jwks.json"
+      - key: SUPABASE_STORAGE_BUCKET
+        value: "DocumentStore"
       - key: LOG_LEVEL
         value: info
