@@ -1,0 +1,31 @@
+:root { --bg:#f7f8fa; --card:#fff; --line:#dfe3e8; --text:#1d2430; --muted:#667085; --accent:#2457d6; --bad:#b42318; --ok:#067647; }
+* { box-sizing: border-box; }
+body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+header { display:flex; align-items:center; gap:16px; padding:12px 24px; background:var(--card); border-bottom:1px solid var(--line); }
+header h1 { font-size:18px; margin:0; flex:0 0 auto; }
+nav { display:flex; gap:4px; flex:1; }
+nav button { border:0; background:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:14px; }
+nav button.active { background:var(--accent); color:#fff; }
+main { max-width:1200px; margin:0 auto; padding:24px; display:grid; gap:20px; }
+section.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+section.card h2 { margin:0 0 12px; font-size:15px; }
+button.primary { background:var(--accent); color:#fff; border:0; padding:8px 14px; border-radius:6px; cursor:pointer; }
+button.link { background:none; border:0; color:var(--accent); cursor:pointer; padding:0 6px; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+input[type=text], textarea, select { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+textarea { min-height:70px; resize:vertical; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+td, th { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+.badge { padding:2px 8px; border-radius:99px; font-size:12px; }
+.badge.ready { background:#d1fadf; color:var(--ok); }
+.badge.processing { background:#fef0c7; color:#93370d; }
+.badge.failed { background:#fee4e2; color:var(--bad); }
+.err { color:var(--bad); font-size:13px; margin-top:6px; }
+.muted { color:var(--muted); font-size:13px; }
+.warn { background:#fef0c7; padding:8px 12px; border-radius:6px; font-size:14px; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.graph { height:420px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.src { border-left:3px solid var(--accent); padding:4px 10px; margin:8px 0; font-size:13px; }
+.center { max-width:360px; margin:15vh auto; text-align:center; }
+@media (max-width:800px) { .cols { grid-template-columns:1fr; } }
