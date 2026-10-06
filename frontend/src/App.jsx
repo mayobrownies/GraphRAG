@@ -1,122 +1,70 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useState } from "react";
+import { supabase } from "./supabase";
+import { api } from "./api";
+import Workspace from "./components/Workspace.jsx";
+import GraphExplorer from "./components/GraphExplorer.jsx";
+import Benchmarks from "./components/Benchmarks.jsx";
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState("workspace");
+  const [me, setMe] = useState(null);
+  const [docs, setDocs] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [lastGraph, setLastGraph] = useState(null);
+  const [nameError, setNameError] = useState("");
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => { if (session) api.me().then(setMe).catch(() => {}); }, [session]);
+
+  const signIn = () =>
+    supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+
+  async function saveUsername() {
+    const name = window.prompt("Choose a username (3 to 30 characters)", me?.username || "");
+    if (!name) return;
+    try { await api.setUsername(name); setMe({ ...me, username: name }); setNameError(""); }
+    catch (e) { setNameError(e.message); }
+  }
+
+  if (!ready) return null;
+  if (!session)
+    return (
+      <div className="center">
+        <h1>Medical GraphRAG</h1>
+        <p className="muted">Sign in with your Google account to access your workspace.</p>
+        <button className="primary" onClick={signIn}>Sign in with Google</button>
+      </div>
+    );
+
+  const display = me?.username || session.user.user_metadata?.full_name || session.user.email;
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
+      <header>
+        <h1>Medical GraphRAG</h1>
+        <nav>
+          {[["workspace", "Workspace"], ["graph", "Graph Explorer"], ["bench", "Benchmarks"]].map(([k, label]) => (
+            <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </nav>
+        <span className="muted">{display}</span>
+        <button className="link" onClick={saveUsername}>Edit username</button>
+        <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
+      </header>
+      {nameError && <div className="err" style={{ padding: "0 24px" }}>{nameError}</div>}
+      <main>
+        {tab === "workspace" && (
+          <Workspace docs={docs} setDocs={setDocs} selected={selected} setSelected={setSelected} setLastGraph={setLastGraph} />
+        )}
+        {tab === "graph" && <GraphExplorer docs={docs} selected={selected} highlight={lastGraph} />}
+        {tab === "bench" && <Benchmarks docs={docs} selected={selected} />}
+      </main>
     </>
-  )
+  );
 }
-
-export default App
