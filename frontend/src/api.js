@@ -1,5 +1,8 @@
 import { supabase } from "./supabase";
 
+// Empty locally (Vite proxy or nginx forwards /api). Set to the Render URL for the Netlify build.
+const API_URL = import.meta.env.VITE_API_URL || "";
+
 async function request(path, options = {}) {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -8,7 +11,7 @@ async function request(path, options = {}) {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(options.json);
   }
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {

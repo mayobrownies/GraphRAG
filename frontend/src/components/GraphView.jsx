@@ -1,10 +1,8 @@
 import { useEffect, useRef } from "react";
 import cytoscape from "cytoscape";
 
-const COLORS = {
-  Disease: "#d92d20", Symptom: "#f79009", Drug: "#2457d6", Treatment: "#1570ef", Procedure: "#7a5af8",
-  Gene: "#099250", Protein: "#12b76a", Biomarker: "#0ba5ec", Organism: "#ba24d5", BodyPart: "#667085", RiskFactor: "#c4320a",
-};
+// One color per node type in backend/app/graph_schema.py
+const COLORS = { Gene: "#099250", Protein: "#7a5af8", Disease: "#d92d20", Drug: "#2457d6" };
 
 export default function GraphView({ nodes, edges, highlightNodes = [], highlightEdges = [], onSelect }) {
   const box = useRef(null);

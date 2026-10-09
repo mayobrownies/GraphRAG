@@ -1,33 +1,19 @@
--- Run in the Supabase SQL editor. Also create a PRIVATE storage bucket named "documents".
-
-create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  username text unique,
-  updated_at timestamptz default now()
-);
-
-create table if not exists public.documents (
-  id uuid primary key,
-  owner_id uuid references auth.users(id) on delete cascade,  -- null for global corpus
-  is_global boolean not null default false,
-  name text not null,
-  sha256 text not null,
-  storage_path text not null,
-  status text not null default 'processing' check (status in ('processing','ready','failed')),
-  stage text,
-  error text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-create index if not exists documents_owner_idx on public.documents(owner_id);
-create index if not exists documents_hash_idx on public.documents(owner_id, sha256);
-
-alter table public.profiles enable row level security;
-alter table public.documents enable row level security;
-
-create policy "own profile" on public.profiles
-  for all using (auth.uid() = id) with check (auth.uid() = id);
-
-create policy "read own or global documents" on public.documents
-  for select using (auth.uid() = owner_id or is_global);
--- All writes to documents go through the backend using the service role key.
+-- Supabase Postgres schema. Run in the Supabase SQL editor; the script must be safe to run more than once
+-- (create ... if not exists for tables and indexes, drop policy if exists before each create policy)
+-- Also create a PRIVATE storage bucket; its name must match SUPABASE_STORAGE_BUCKET in .env and render.yaml
+-- profiles: one row per account (id = auth.users id), custom username unique and 3-30 characters
+--   Created on first sign-in, either by a trigger on auth.users or by GET /api/me upserting it
+-- documents: metadata and processing state for every PDF
+--   id, owner_id (null for the global corpus), is_global, name, sha256, storage_path
+--   status in ('processing', 'ready', 'failed'), stage (progress message), error (short message for the user)
+--   created_at, updated_at (set on every status change)
+--   is_global must be true exactly when owner_id is null
+--   unique nulls not distinct (owner_id, sha256) so the database also blocks duplicate uploads
+-- hidden_documents: (user_id, document_id) for global corpus documents a user removed from their workspace
+--   Removing a global document only affects that account (SDD 2.2, 4.3)
+-- Row level security on every table
+--   profiles: a user can read and update only their own row
+--   documents: a user can read their own documents, plus global ones they haven't hidden
+--   All writes go through the backend with the secret key
+-- The secret key bypasses RLS, so document_store.py must still filter by owner and hidden_documents
+-- Chunks, embeddings, and graph data are not stored here. They live in Qdrant and Neo4j, linked by document id

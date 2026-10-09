@@ -2,6 +2,8 @@
 
 A GraphRAG pipeline for medical PDFs. Documents are chunked, an LLM (Qwen 3.5:0.8b through Ollama) extracts entities and relationships that are validated against a fixed schema, and the results are stored in a Neo4j Knowledge Graph and a Qdrant vector index. Queries use hybrid retrieval (vector search plus multi-hop Cypher traversal) and return grounded answers with page-level sources and the exact graph path.
 
+The requirements and design are in `docs/` (SRS and SDD). Docstrings and PRs refer to their section numbers, for example 3.4.6 or SDD 5.4.
+
 ## Features (from the requirements specification)
 
 - Google sign-in with Supabase Auth, optional custom username, sign out, per-account data isolation
@@ -16,31 +18,42 @@ A GraphRAG pipeline for medical PDFs. Documents are chunked, an LLM (Qwen 3.5:0.
 ## Layout
 
     backend/    FastAPI app, pipeline services, tests, corpus seeding script
-    frontend/   React (Vite) UI served by nginx
+    frontend/   React (Vite) UI, served by nginx in Docker and by Netlify in deployment
     supabase/   schema.sql for Postgres tables and policies
     corpus/     base medical PDFs (git-ignored)
-    docs/       Software Design Document
-    docker-compose.yml, .env.example
+    docs/       SRS and SDD
+    .github/    CI workflow and pull request template
+    docker-compose.yaml, .env.example, render.yaml, netlify.toml
 
 ## Setup
 
-1. Create a Supabase project. Run `supabase/schema.sql` in the SQL editor and create a **private** storage bucket named `documents`.
-2. In Supabase, enable the Google provider (Authentication > Providers) and add your site URL (`http://localhost:3000`) to the redirect URLs.
-3. `cp .env.example .env` and fill in the Supabase keys and a Neo4j password.
-4. `docker compose up --build`. The `ollama-pull` service downloads the models on first run.
+1. Create a Supabase project. Run `supabase/schema.sql` in the SQL editor and create a **private** storage bucket. Its name must match `SUPABASE_STORAGE_BUCKET`.
+2. In Supabase, enable the Google provider (Authentication > Providers) with the Google client id and secret, and add `http://localhost:3000` and `http://localhost:5173` to the redirect URLs.
+3. `cp .env.example .env` and fill it in. `.env` is git-ignored. Ask the team lead for the shared values.
+4. `docker compose up --build`. This runs Neo4j, Qdrant and Ollama locally. The `ollama-pull` service downloads the models on first run.
 5. Open http://localhost:3000.
-6. Optional global corpus: put PDFs in `corpus/`, add `- ./corpus:/srv/corpus` under the `backend` service volumes, restart, then run `docker compose exec backend python -m scripts.seed_corpus /srv/corpus`.
+6. Optional global corpus: put PDFs in `corpus/`, then run `docker compose exec backend python -m scripts.seed_corpus /srv/corpus`.
 
 ## Development and tests
 
-    cd backend && pip install -r requirements.txt && pytest      # 29 tests
-    cd frontend && npm install && npm test                       # 6 component tests
-    cd frontend && npm run dev                                   # proxies /api to localhost:8000
+    cd backend && pip install -r requirements-dev.txt && pytest
+    cd backend && uvicorn app.main:app --reload                  # API on localhost:8000
+    cd frontend && npm install && npm run dev                    # UI on localhost:5173, proxies /api to localhost:8000
+    cd frontend && npm test && npm run lint
 
-The backend suite runs the real FastAPI app and an in-memory Qdrant against in-memory stand-ins for Supabase, Neo4j and Ollama. It covers upload validation, failure and retry, duplicate override, hybrid and standard retrieval, no-context and partial-support answers, account isolation, deletion and re-indexing, and the graph explorer endpoints. Run the stack with Docker Compose for a live check against real services.
+The backend tests run the real FastAPI app and an in-memory Qdrant against in-memory fakes for Supabase, Neo4j and Ollama, so they need no network. Run the stack with Docker Compose for a live check against real services.
+
+## Workflow
+
+Work on a branch, open a pull request into `main`, and fill in the template. CI runs the backend tests and the frontend lint, tests and build on every pull request.
+
+## Deployment
+
+- Backend: Render (`render.yaml`), using Neo4j Aura and Qdrant Cloud. Secrets are set in the Render dashboard.
+- Frontend: Netlify (`netlify.toml`). Set `VITE_API_URL` (the Render URL), `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in the Netlify dashboard, and add the Netlify URL to `CORS_ORIGINS` on Render and to the Supabase redirect URLs.
 
 ## Notes
 
-- The specification does not name an embedding model. `nomic-embed-text` (768 dimensions) is the default and is configurable through `EMBED_MODEL` and `EMBED_DIM`.
-- Browser traffic is HTTPS and JSON in deployment (requirement 5.3.1). Terminate TLS at a reverse proxy in front of the frontend container.
-- Secrets live only in backend environment variables. The Supabase anon key in the frontend build is public by design.
+- The embedding model is `qwen3-embedding:0.6b`, set by `OLLAMA_EMBED_MODEL`. Chunks and queries must use the same model.
+- Browser traffic is HTTPS and JSON in deployment.
+- Secrets live only in backend environment variables. The Supabase publishable key in the frontend build is public by design.
