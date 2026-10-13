@@ -25,6 +25,28 @@ The requirements and design are in `docs/` (SRS and SDD). Docstrings and PRs ref
     .github/    CI workflow and pull request template
     docker-compose.yaml, .env.example, render.yaml, netlify.toml
 
+### Backend layout
+
+The backend is layered: routers -> services -> repositories.
+
+    backend/app/
+      main.py          app setup, startup checks, router registration, /health
+      models.py        Ollama client for chat and embeddings
+      schemas.py       shared Pydantic types (SDD 5.5)
+      graph_schema.py  allowed node and relationship types (SDD 4.4)
+      core/            config, error handling and logging, auth
+      routers/         HTTP endpoints: documents, query, graph, account
+      services/        business logic: ingestion pipeline, extraction, PDF parsing, jobs, retrieval, generation
+      repositories/    datastore access: graph_store (Neo4j), vector_store (Qdrant), document_store (Supabase)
+
+- `core/`: settings, error handling and logging, auth
+- `routers/`: HTTP endpoints; call services, never databases or the LLM
+- `services/`: business logic; ingestion and query pipelines
+- `repositories/`: storage only, one file per datastore
+- `tests/`: pytest suite
+- `scripts/`: one-off tools such as corpus seeding
+
+
 ## Setup
 
 1. Create a Supabase project. Run `supabase/schema.sql` in the SQL editor and create a **private** storage bucket. Its name must match `SUPABASE_STORAGE_BUCKET`.
