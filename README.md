@@ -43,7 +43,7 @@ The backend is layered: routers -> services -> repositories.
 - `routers/`: HTTP endpoints; call services, never databases or the LLM
 - `services/`: business logic; ingestion and query pipelines
 - `repositories/`: storage only, one file per datastore
-- `tests/`: pytest suite, runs against in-memory fakes
+- `tests/`: pytest suite
 - `scripts/`: one-off tools such as corpus seeding
 
 
