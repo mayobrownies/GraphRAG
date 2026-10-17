@@ -1,7 +1,7 @@
 """
 Qwen through Ollama: one client for chat (extraction and answer generation) and embeddings (chunks and queries)
 Model names and the Ollama URL come from config (OLLAMA_LLM_MODEL, OLLAMA_EMBED_MODEL, OLLAMA_BASE_URL)
-The same embedding model must be used for chunks and queries (SDD 5.3)
+The same embedding model must be used for chunks and queries
 truncate=False makes Ollama raise on text longer than the embedding model's context, so keep the chunk size below it
 Shared data types (DocumentRecord, Response, ...) are in schemas.py
 """
