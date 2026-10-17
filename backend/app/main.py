@@ -6,3 +6,11 @@ CORS: allow only the origins in config (CORS_ORIGINS)
 Register the account, documents, query, and graph routers under the /api prefix (nginx forwards /api/ to the backend)
 GET /health returns {"status": "ok"} for Render's health check (or which ever service we end up using)
 """
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
