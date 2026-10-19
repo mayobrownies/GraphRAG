@@ -37,3 +37,4 @@ class Models:
             truncate=False,
         )
         return response.embeddings
+
