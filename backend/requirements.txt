@@ -12,3 +12,4 @@ langchain-core>=0.2
 langchain-ollama>=0.1
 langchain-text-splitters>=0.2
 pypdf>=4.2
+unstructured>=0.14.0
