@@ -1,4 +1,6 @@
+import base64
 import os
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -6,9 +8,13 @@ from supabase import acreate_client
 
 from app.repositories.document_db import (
     DocumentDB,
+    DocumentRow,
     DocumentStatus,
     DuplicateDocument,
+    InvalidCursor,
     UsernameTaken,
+    decode_cursor,
+    encode_cursor,
 )
 
 # There is no in-memory Supabase, so the database tests need a dev project with supabase/schema.sql applied
@@ -41,10 +47,40 @@ async def test_update_rejects_invalid_changes(kwargs):
         await DocumentDB(client=None).update(str(uuid4()), **kwargs)
 
 
-@pytest.mark.parametrize("kwargs", [{"scope": "everyone"}, {"limit": 0}, {"limit": 101}, {"offset": -1}])
+@pytest.mark.parametrize("kwargs", [{"scope": "everyone"}, {"limit": 0}, {"limit": 101}, {"cursor": "not-a-cursor"}])
 async def test_get_all_rejects_invalid_arguments(kwargs):
     with pytest.raises(ValueError):
         await DocumentDB(client=None).get_all(str(uuid4()), **kwargs)
+
+
+def test_cursor_round_trips():
+    doc_id = str(uuid4())
+    row = DocumentRow(doc_id, None, True, "a.pdf", "h", "p", "ready", None, None,
+                      "2026-10-21T12:00:00.123456+00:00", "2026-10-21T12:00:00.123456+00:00")
+    assert decode_cursor(encode_cursor(row)) == ("2026-10-21T12:00:00.123456+00:00", doc_id)
+
+
+def b64(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode("utf-8")).decode("ascii")
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "%%%",
+        "é",
+        b64("not json"),
+        b64('{"a": 1}'),
+        b64('["2026-10-21T12:00:00+00:00"]'),
+        b64('[1, "8f14e45f-ceea-4e7a-9f6e-1c2b3d4e5f60"]'),
+        # Filter injection attempts must not survive decoding
+        b64('["2026-10-21T12:00:00+00:00,owner_id.is.null", "8f14e45f-ceea-4e7a-9f6e-1c2b3d4e5f60"]'),
+        b64('["2026-10-21T12:00:00+00:00", "x),is_global.is.true"]'),
+    ],
+)
+def test_bad_cursors_are_rejected(cursor):
+    with pytest.raises(InvalidCursor):
+        decode_cursor(cursor)
 
 
 async def test_user_id_must_be_a_uuid():
@@ -141,13 +177,36 @@ async def test_get_all_filters_and_paginates(db, users):
     await db.update(other.id, "ready")
 
     first = await db.get_all(alice, scope="own", search="brca1_", limit=2)
-    second = await db.get_all(alice, scope="own", search="brca1_", limit=2, offset=2)
-    assert first.total == second.total == 3
-    assert len(first.items) == 2 and len(second.items) == 1
+    second = await db.get_all(alice, scope="own", search="brca1_", limit=2, cursor=first.next_cursor)
+    assert len(first.items) == 2 and first.next_cursor
+    assert len(second.items) == 1 and second.next_cursor is None
     assert not {d.id for d in first.items} & {d.id for d in second.items}
 
     ready = await db.get_all(alice, scope="own", status="ready")
     assert [d.id for d in ready.items] == [other.id]
+    assert ready.next_cursor is None
+
+
+@needs_supabase
+async def test_cursor_pages_keep_the_scope_filter(db, users, global_ids):
+    # Scope "all" already sends an or= filter; the cursor adds a second one, and both must apply
+    alice, bob = users
+    tag = uuid4().hex[:8]
+    mine = [await add(db, alice, name=f"{tag}_{i}.pdf") for i in range(3)]
+    shared = await add(db, None, name=f"{tag}_global.pdf", global_ids=global_ids)
+    await add(db, bob, name=f"{tag}_bob.pdf")
+
+    seen, cursor = [], None
+    while True:
+        page = await db.get_all(alice, search=tag, limit=1, cursor=cursor)
+        seen += [d.id for d in page.items]
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+
+    # Every visible document exactly once, newest first, and never bob's
+    expected = sorted(mine + [shared], key=lambda d: (datetime.fromisoformat(d.created_at), d.id), reverse=True)
+    assert seen == [d.id for d in expected]
 
 
 @needs_supabase
