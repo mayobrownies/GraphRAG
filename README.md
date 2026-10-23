@@ -37,7 +37,7 @@ The backend is layered: routers -> services -> repositories.
       core/            config, error handling and logging, auth
       routers/         HTTP endpoints: documents, query, graph, account
       services/        business logic: ingestion pipeline, extraction, PDF parsing, jobs, retrieval, generation
-      repositories/    datastore access: graph_store (Neo4j), vector_store (Qdrant), document_store (Supabase)
+      repositories/    datastore access: graph_store (Neo4j), vector_store (Qdrant), document_store (Supabase Storage), document_db (Supabase Postgres)
 
 - `core/`: settings, error handling and logging, auth
 - `routers/`: HTTP endpoints; call services, never databases or the LLM
