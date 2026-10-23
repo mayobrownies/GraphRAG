@@ -27,7 +27,7 @@ async function request(path, options = {}) {
 export const api = {
   me: () => request("/api/me"),
   setUsername: (username) => request("/api/me/username", { method: "PUT", json: { username } }),
-  documents: () => request("/api/documents"),
+  documents: () => request("/api/documents").then((page) => page.items),
   upload: (file, override = false) => {
     const form = new FormData();
     form.append("file", file);
@@ -35,7 +35,7 @@ export const api = {
   },
   retry: (id) => request(`/api/documents/${id}/retry`, { method: "POST" }),
   remove: (id) => request(`/api/documents/${id}`, { method: "DELETE" }),
-  sourceUrl: (id) => request(`/api/documents/${id}/url`),
+  sourceUrl: (id) => request(`/api/documents/${id}/download`),
   query: (question, doc_ids, mode = "graph") =>
     request("/api/query", { method: "POST", json: { question, doc_ids, mode } }),
   benchmark: (question, doc_ids) =>
