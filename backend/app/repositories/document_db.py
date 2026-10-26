@@ -20,6 +20,8 @@ from uuid import UUID
 from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
+from app.core.errors import DuplicateDocument, InvalidCursor, UsernameTaken
+
 DOCUMENTS = "documents"
 HIDDEN = "hidden_documents"
 PROFILES = "profiles"
@@ -38,18 +40,6 @@ class Scope(StrEnum):
     ALL = "all"  # the user's own documents plus global ones they haven't hidden
     OWN = "own"
     GLOBAL = "global"
-
-
-class DuplicateDocument(Exception):
-    pass
-
-
-class UsernameTaken(Exception):
-    pass
-
-
-class InvalidCursor(ValueError):
-    pass
 
 
 @dataclass
