@@ -50,7 +50,7 @@ The backend is layered: routers -> services -> repositories.
 ## Setup
 
 1. Create a Supabase project. Run `supabase/schema.sql` in the SQL editor and create a **private** storage bucket. Its name must match `SUPABASE_STORAGE_BUCKET`.
-2. In Supabase, enable the Google provider (Authentication > Providers) with the Google client id and secret, and add `http://localhost:3000` and `http://localhost:5173` to the redirect URLs.
+2. In Supabase, enable the Google provider (Authentication > Providers) with the Google client id and secret, and add `http://localhost:3000` to the redirect URLs.
 3. `cp .env.example .env` and fill it in. `.env` is git-ignored. Ask the team lead for the shared values.
 4. `docker compose up --build`. This runs Neo4j, Qdrant and Ollama locally. The `ollama-pull` service downloads the models on first run.
 5. Open http://localhost:3000.
@@ -60,7 +60,7 @@ The backend is layered: routers -> services -> repositories.
 
     cd backend && pip install -r requirements-dev.txt && pytest
     cd backend && uvicorn app.main:app --reload                  # API on localhost:8000
-    cd frontend && npm install && npm run dev                    # UI on localhost:5173, proxies /api to localhost:8000
+    cd frontend && npm install && npm run dev                    # UI on localhost:3000, proxies /api to localhost:8000
     cd frontend && npm test && npm run lint
 
 ## Workflow
