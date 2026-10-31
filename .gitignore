@@ -21,4 +21,4 @@ venv/
 .idea/
 .vscode/
 
-corpus/*.pdf
+corpus/**/*.pdf
