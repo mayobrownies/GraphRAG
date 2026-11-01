@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.graph_schema import Entity, GraphChunk
+from app.graph_schema import Paper
 from app.repositories.graph_store import GraphStore, StaleGraphWrite
 
 
@@ -14,43 +14,51 @@ def store():
 
 
 async def test_no_documents_or_seeds_never_queries_database(store):
-    assert await store.search("alice", []) == []
-    assert await store.node_details("alice", [], "x") is None
-    assert await store.traverse("alice", ["doc"], []) == []
-    assert await store.expand("alice", [], "x") == []
+    assert await store.graph([]) == {"nodes": [], "edges": []}
+    assert await store.neighbors([], ["doc"]) == []
+    assert await store.neighbors(["doc"], []) == []
     store._read.assert_not_called()
+
+
+async def test_graph_without_matching_papers_skips_edge_query(store):
+    assert await store.graph(["doc"]) == {"nodes": [], "edges": []}
+    assert store._read.call_count == 1
 
 
 async def test_search_passes_literal_user_text_as_parameter(store):
     text = "x' MATCH (n) DETACH DELETE n //"
-    await store.search("alice", ["doc", "doc"], text)
+    await store.graph(["doc", "doc"], text)
     query = store._read.call_args.args[0]
     params = store._read.call_args.kwargs
     assert text not in query
-    assert params["account"] == "alice" and params["doc_ids"] == ["doc"]
+    assert params["doc_ids"] == ["doc"]
     assert params["text"] == text.casefold()
 
 
-@pytest.mark.parametrize("hops", [0, 3, True, "2"])
-async def test_rejects_unbounded_or_non_integer_traversal(store, hops):
+@pytest.mark.parametrize("value", [0, 201, True, "10"])
+async def test_caps_limit_and_per_paper(store, value):
     with pytest.raises(ValueError):
-        await store.traverse("alice", ["doc"], ["id"], hops=hops)
+        await store.graph(["doc"], limit=value)
+    with pytest.raises(ValueError):
+        await store.neighbors(["doc"], ["doc"], per_paper=value)
     store._read.assert_not_called()
 
 
-@pytest.mark.parametrize("limit", [0, 201, True, "10"])
-async def test_caps_query_result_limit(store, limit):
+async def test_invalid_doc_id_cannot_issue_query(store):
     with pytest.raises(ValueError):
-        await store.search("alice", ["doc"], limit=limit)
-
-
-async def test_invalid_account_cannot_issue_query(store):
+        await store.graph([""])
     with pytest.raises(ValueError):
-        await store.search("", ["doc"])
+        await store.neighbors(["doc"], [" "])
     store._read.assert_not_called()
 
 
-async def test_stale_write_stops_before_any_data_is_inserted(store):
+@pytest.mark.parametrize("revision,min_weight", [(0, 0.3), (True, 0.3), (1, 1.5), (1, "0.3")])
+async def test_add_paper_rejects_bad_revision_or_weight(store, revision, min_weight):
+    with pytest.raises(ValueError):
+        await store.add_paper("alice", revision, Paper("doc", "name", [1.0]), min_weight=min_weight)
+
+
+async def test_stale_write_stops_before_any_edge_is_written(store):
     calls = []
     async def run(tx, query, **params):
         calls.append(query)
@@ -60,9 +68,5 @@ async def test_stale_write_stops_before_any_data_is_inserted(store):
     store._run = run
     store._write = write
     with pytest.raises(StaleGraphWrite):
-        await store.upsert_chunk("alice", 1, GraphChunk("doc", "chunk", 1, "text", (Entity("g", "Gene"),)))
-    assert len(calls) == 1
-
-
-async def test_node_details_returns_none_for_inaccessible_node(store):
-    assert await store.node_details("alice", ["doc"], "other-account-id") is None
+        await store.add_paper("alice", 1, Paper("doc", "name", [1.0, 0.0]))
+    assert len(calls) == 2 and not any("ASSOCIATED_WITH" in query for query in calls)

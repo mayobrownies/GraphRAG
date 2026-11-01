@@ -1,8 +1,4 @@
-"""Opt-in tests against real Neo4j; creates only UUID-namespaced synthetic data.
-
-Set NEO4J_TEST_URI, NEO4J_TEST_USERNAME, NEO4J_TEST_PASSWORD and optionally
-NEO4J_TEST_DATABASE. These are never read from production environment names.
-"""
+"""Opt-in tests against real Neo4j. Set NEO4J_TEST_URI, NEO4J_TEST_USERNAME and NEO4J_TEST_PASSWORD."""
 import asyncio
 import os
 from uuid import uuid4
@@ -10,7 +6,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from app.graph_schema import Entity, GraphChunk, Relationship
+from app.graph_schema import Paper
 from app.repositories.graph_store import GraphStore, StaleGraphWrite
 
 pytestmark = pytest.mark.integration
@@ -27,132 +23,87 @@ async def live():
     await store.verify_connection()
     await store.create_constraints()
     try:
-        yield store, account, other
+        yield store, account, other, lambda name: f"{prefix}-{name}"
     finally:
-        # Only delete records owned by the unique test accounts created above.
         async with store.driver.session(database=store.database) as session:
             result = await session.run("MATCH (n) WHERE n.account IN $accounts DETACH DELETE n", accounts=[account, other])
             await result.consume()
         await store.close()
 
 
-def sample(doc, chunk, page=1):
-    gene, protein, disease = Entity("BRCA1", "Gene"), Entity("protein a", "Protein"), Entity("disease a", "Disease")
-    return GraphChunk(doc, chunk, page, "Synthetic test evidence", (gene, protein, disease), (
-        Relationship(gene, protein, "ENCODES"), Relationship(protein, disease, "ASSOCIATED_WITH"),
-    ))
+async def add(store, account, doc_id, embedding, name=None, **kwargs):
+    revision = await store.begin_document(account, doc_id)
+    return await store.add_paper(account, revision, Paper(doc_id, name or doc_id, embedding), **kwargs)
 
 
-async def test_repeat_ingestion_has_stable_ids_and_no_duplicate_evidence(live):
-    store, account, _ = live
-    revision = await store.begin_document(account, "doc-a")
-    ids = await store.upsert_chunk(account, revision, sample("doc-a", "c1"))
-    assert ids == await store.upsert_chunk(account, revision, sample("doc-a", "c1"))
-    nodes = await store.search(account, ["doc-a"])
-    assert len(nodes) == 3 and all(len(node["sources"]) == 1 for node in nodes)
-    paths = await store.traverse(account, ["doc-a"], [Entity("BRCA1", "Gene").id_for(account)])
-    assert sorted(len(path["edges"]) for path in paths) == [1, 2]
-    assert all(edge["chunk_id"] == "c1" and edge["page"] == 1 for path in paths for edge in path["edges"])
+async def test_weight_is_plain_cosine_similarity(live):
+    store, account, _, doc = live
+    await add(store, account, doc("a"), [1.0, 0.0])
+    links = await add(store, account, doc("b"), [2.0, 0.0])
+    assert links == [{"doc_id": doc("a"), "weight": pytest.approx(1.0)}]
+    assert await add(store, account, doc("c"), [0.0, 1.0]) == []
+    opposite = await add(store, account, doc("d"), [-1.0, 0.0], min_weight=-1)
+    assert {link["doc_id"]: link["weight"] for link in opposite} == {
+        doc("a"): pytest.approx(-1.0), doc("b"): pytest.approx(-1.0), doc("c"): pytest.approx(0.0),
+    }
 
 
-async def test_every_edge_and_source_is_filtered_by_account_and_selected_docs(live):
-    store, account, other = live
-    for owner, doc in [(account, "doc-a"), (account, "doc-b"), (other, "doc-a")]:
-        revision = await store.begin_document(owner, doc)
-        await store.upsert_chunk(owner, revision, sample(doc, "same-chunk-id", page=2 if doc == "doc-b" else 1))
-    gene_id = Entity("BRCA1", "Gene").id_for(account)
-    paths = await store.traverse(account, ["doc-a"], [gene_id])
-    assert paths and all(edge["doc_id"] == "doc-a" for path in paths for edge in path["edges"])
-    assert await store.traverse(other, ["doc-a"], [gene_id]) == []
-    details = await store.node_details(account, ["doc-a"], gene_id)
-    assert len(details["sources"]) == 1 and details["sources"][0]["page"] == 1
-    assert await store.search(account, []) == []
+async def test_graph_and_neighbors_only_show_selected_papers(live):
+    store, account, other, doc = live
+    await add(store, account, doc("a"), [1.0, 0.0], "BRCA1 Review")
+    await add(store, account, doc("b"), [0.9, 0.1], "PARP1 Mechanism")
+    await add(store, other, doc("hidden"), [1.0, 0.05], "Hidden Paper")
+    graph = await store.graph([doc("a"), doc("b")])
+    assert [node["doc_id"] for node in graph["nodes"]] == [doc("a"), doc("b")]
+    assert len(graph["edges"]) == 1
+    assert {graph["edges"][0]["source"], graph["edges"][0]["target"]} == {doc("a"), doc("b")}
+    assert [node["name"] for node in (await store.graph([doc("a"), doc("b")], "  brca1 "))["nodes"]] == ["BRCA1 Review"]
+    assert await store.graph([doc("a"), doc("b")], "x' MATCH (n) DETACH DELETE n //") == {"nodes": [], "edges": []}
+    linked = await store.neighbors([doc("a"), doc("b")], [doc("a")])
+    assert [(row["seed"], row["doc_id"]) for row in linked] == [(doc("a"), doc("b"))]
+    assert await store.neighbors([doc("b")], [doc("a")]) == []
 
 
-async def test_delete_keeps_shared_evidence_and_rejects_old_job(live):
-    store, account, _ = live
-    revision_a = await store.begin_document(account, "doc-a")
-    await store.upsert_chunk(account, revision_a, sample("doc-a", "c1"))
-    revision_b = await store.begin_document(account, "doc-b")
-    await store.upsert_chunk(account, revision_b, sample("doc-b", "c2"))
-    await store.delete_document(account, "doc-a")
-    assert await store.search(account, ["doc-a"]) == []
-    assert len(await store.search(account, ["doc-b"])) == 3
+async def test_per_paper_keeps_only_strongest_links(live):
+    store, account, _, doc = live
+    await add(store, account, doc("seed"), [1.0, 0.0])
+    for name, embedding in (("close", [1.0, 0.1]), ("middle", [1.0, 0.5]), ("far", [1.0, 0.9])):
+        await add(store, account, doc(name), embedding)
+    ids = [doc(name) for name in ("seed", "close", "middle", "far")]
+    linked = await store.neighbors(ids, [doc("seed")], per_paper=2)
+    assert [row["doc_id"] for row in linked] == [doc("close"), doc("middle")]
+    assert len((await store.graph(ids, per_paper=1))["edges"]) < len((await store.graph(ids, per_paper=3))["edges"])
+
+
+async def test_reindex_and_delete_remove_edges_and_reject_old_jobs(live):
+    store, account, _, doc = live
+    await add(store, account, doc("a"), [1.0, 0.0])
+    first = await store.begin_document(account, doc("b"))
+    await store.add_paper(account, first, Paper(doc("b"), "b", [1.0, 0.0]))
+    second = await store.begin_document(account, doc("b"))
+    assert [node["doc_id"] for node in (await store.graph([doc("a"), doc("b")]))["nodes"]] == [doc("a")]
     with pytest.raises(StaleGraphWrite):
-        await store.upsert_chunk(account, revision_a, sample("doc-a", "c1"))
-    await store.delete_document(account, "doc-b")
-    assert await store.search(account, ["doc-a", "doc-b"]) == []
-
-
-async def test_replacement_and_chunk_update_remove_old_facts(live):
-    store, account, _ = live
-    first = await store.begin_document(account, "doc-a")
-    await store.upsert_chunk(account, first, sample("doc-a", "c1"))
-    new = await store.begin_document(account, "doc-a")
+        await store.add_paper(account, first, Paper(doc("b"), "b", [1.0, 0.0]))
+    await store.add_paper(account, second, Paper(doc("b"), "b", [0.0, 1.0]))
+    assert (await store.graph([doc("a"), doc("b")]))["edges"] == []
+    await store.delete_document(account, doc("a"))
+    assert [node["doc_id"] for node in (await store.graph([doc("a"), doc("b")]))["nodes"]] == [doc("b")]
     with pytest.raises(StaleGraphWrite):
-        await store.upsert_chunk(account, first, sample("doc-a", "c1"))
-    await store.upsert_chunk(account, new, sample("doc-a", "c1"))
-    await store.upsert_chunk(account, new, GraphChunk("doc-a", "c1", 3, "Replacement text", (Entity("new gene", "Gene"),)))
-    nodes = await store.search(account, ["doc-a"])
-    assert len(nodes) == 1 and nodes[0]["name"] == "new gene"
-    assert nodes[0]["sources"][0]["page"] == 3
+        await store.add_paper(account, second, Paper(doc("a"), "a", [1.0, 0.0]))
 
 
-async def test_search_filters_and_paths_cannot_bridge_an_unselected_document(live):
-    store, account, _ = live
-    gene, protein, disease = Entity("BRCA1", "Gene"), Entity("protein a", "Protein"), Entity("disease a", "Disease")
-    for doc, entities, relationship in (
-        ("selected", (gene, protein), Relationship(gene, protein, "ENCODES")),
-        ("hidden", (protein, disease), Relationship(protein, disease, "ASSOCIATED_WITH")),
-    ):
-        revision = await store.begin_document(account, doc)
-        await store.upsert_chunk(account, revision, GraphChunk(doc, "c1", 1, "Evidence", entities, (relationship,)))
-    assert [node["entity_id"] for node in await store.search(account, ["selected"], "  BRCA1  ", "Gene")] == [gene.id_for(account)]
-    assert await store.search(account, ["selected"], "BRCA1", "Drug") == []
-    assert await store.search(account, ["selected"], "x' MATCH (n) DETACH DELETE n //") == []
-    assert await store.node_details(account, ["selected"], disease.id_for(account)) is None
-    selected = await store.traverse(account, ["selected"], [gene.id_for(account)])
-    assert [len(path["edges"]) for path in selected] == [1]
-    both = await store.traverse(account, ["selected", "hidden"], [gene.id_for(account)])
-    assert sorted(len(path["edges"]) for path in both) == [1, 2]
-    reverse = await store.expand(account, ["selected"], protein.id_for(account))
-    assert len(reverse) == 1
-    assert reverse[0]["edges"][0]["source"] == gene.id_for(account)
-    assert reverse[0]["edges"][0]["target"] == protein.id_for(account)
-
-
-async def test_failed_chunk_replacement_rolls_back_previous_evidence(live, monkeypatch):
-    store, account, _ = live
-    revision = await store.begin_document(account, "doc-a")
-    await store.upsert_chunk(account, revision, sample("doc-a", "c1"))
-    run = store._run
-
-    async def fail_after_chunk_creation(tx, query, **params):
-        rows = await run(tx, query, **params)
-        if "CREATE (:KGChunk" in query:
-            raise RuntimeError("Simulated extraction write failure")
-        return rows
-
-    with monkeypatch.context() as patch:
-        patch.setattr(store, "_run", fail_after_chunk_creation)
-        with pytest.raises(RuntimeError, match="Simulated extraction write failure"):
-            await store.upsert_chunk(account, revision, GraphChunk("doc-a", "c1", 9, "Incomplete replacement", (Entity("new gene", "Gene"),)))
-    nodes = await store.search(account, ["doc-a"])
-    assert len(nodes) == 3 and all(node["sources"][0]["page"] == 1 for node in nodes)
-    assert len(await store.traverse(account, ["doc-a"], [Entity("BRCA1", "Gene").id_for(account)])) == 2
-
-
-async def test_concurrent_revisions_and_chunk_writes_remain_consistent(live):
-    store, account, _ = live
-    revisions = await asyncio.gather(*(store.begin_document(account, "doc-a") for _ in range(3)))
-    assert sorted(revisions) == [1, 2, 3]
+async def test_another_account_cannot_write_to_a_paper(live):
+    store, account, other, doc = live
+    revision = await store.begin_document(account, doc("a"))
     with pytest.raises(StaleGraphWrite):
-        await store.upsert_chunk(account, min(revisions), sample("doc-a", "old"))
-    revision = max(revisions)
-    await asyncio.gather(*(store.upsert_chunk(account, revision, sample("doc-a", f"c{i}")) for i in range(4)))
-    nodes = await store.search(account, ["doc-a"])
-    assert len(nodes) == 3 and all(len(node["sources"]) == 4 for node in nodes)
-    await store.delete_document(account, "doc-a")
-    assert await store.search(account, ["doc-a"]) == []
-    with pytest.raises(StaleGraphWrite):
-        await store.upsert_chunk(account, revision, sample("doc-a", "late"))
+        await store.add_paper(other, revision, Paper(doc("a"), "a", [1.0, 0.0]))
+
+
+async def test_concurrent_papers_link_exactly_once_per_pair(live):
+    store, account, _, doc = live
+    ids = [doc(f"p{i}") for i in range(4)]
+    revisions = [await store.begin_document(account, doc_id) for doc_id in ids]
+    await asyncio.gather(*(store.add_paper(account, r, Paper(d, d, [1.0, 0.0])) for d, r in zip(ids, revisions)))
+    graph = await store.graph(ids, per_paper=10)
+    pairs = [frozenset((edge["source"], edge["target"])) for edge in graph["edges"]]
+    assert len(pairs) == 6 and len(set(pairs)) == 6

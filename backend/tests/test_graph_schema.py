@@ -1,41 +1,26 @@
+import math
+
 import pytest
 
-from app.graph_schema import Entity, GraphChunk, Relationship, entity_id, normalize_name
+from app.graph_schema import Paper, normalize_name
 
 
 def test_names_normalize_unicode_whitespace_and_case():
     assert normalize_name("  ＢＲＣＡ１  Gene\n") == "brca1 gene"
 
 
-def test_identity_is_stable_but_separated_by_account_and_type():
-    identity = entity_id("alice", "Gene", " BRCA1 ")
-    assert identity == entity_id("alice", "Gene", "brca1")
-    assert identity != entity_id("bob", "Gene", "brca1")
-    assert identity != entity_id("alice", "Protein", "brca1")
+def test_paper_stores_embedding_as_tuple():
+    paper = Paper("doc", "BRCA1 review", [0.1, 2, -3.5])
+    assert paper.embedding == (0.1, 2, -3.5)
 
 
-@pytest.mark.parametrize("name,node_type", [("", "Gene"), ("x", "Anything"), ("x", "Gene) DELETE n")])
-def test_rejects_empty_names_and_unapproved_types(name, node_type):
+@pytest.mark.parametrize("doc_id,name", [("", "name"), ("doc", ""), ("doc", "   ")])
+def test_paper_requires_doc_id_and_name(doc_id, name):
     with pytest.raises(ValueError):
-        Entity(name, node_type)
+        Paper(doc_id, name, [1.0])
 
 
-def test_relationship_validates_direction_and_keeps_studied_for_separate():
-    drug, disease = Entity("d", "Drug"), Entity("illness", "Disease")
-    assert Relationship(drug, disease, "STUDIED_FOR") != Relationship(drug, disease, "TREATS")
+@pytest.mark.parametrize("embedding", [[], [math.nan], [math.inf], [True], ["0.5"], [None]])
+def test_paper_rejects_empty_or_non_numeric_embedding(embedding):
     with pytest.raises(ValueError):
-        Relationship(disease, drug, "TREATS")
-    with pytest.raises(ValueError):
-        Relationship(drug, disease, "TREATS] DELETE n")
-
-
-@pytest.mark.parametrize("page", [0, -1, True, 1.5])
-def test_chunk_requires_positive_integer_page(page):
-    with pytest.raises(ValueError):
-        GraphChunk("doc", "chunk", page, "text")
-
-
-def test_chunk_rejects_undeclared_relationship_endpoint():
-    gene, protein = Entity("a", "Gene"), Entity("b", "Protein")
-    with pytest.raises(ValueError):
-        GraphChunk("doc", "chunk", 1, "text", (gene,), (Relationship(gene, protein, "ENCODES"),))
+        Paper("doc", "name", embedding)
