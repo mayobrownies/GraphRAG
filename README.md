@@ -63,6 +63,8 @@ The backend is layered: routers -> services -> repositories.
     cd frontend && npm install && npm run dev                    # UI on localhost:3000, proxies /api to localhost:8000
     cd frontend && npm test && npm run lint
 
+Neo4j storage now includes schema validation, stable entity IDs, source evidence, bounded graph traversal, and document cleanup. See [Neo4j backend notes](docs/neo4j-backend.md) for setup and interfaces; graph routes and ingestion integration are still in progress.
+
 ## Workflow
 
 Work on a branch, open a pull request into `main`, and fill in the template. CI runs the backend tests and the frontend lint, tests and build on every pull request.
