@@ -6,13 +6,11 @@ from uuid import uuid4
 import pytest
 from supabase import acreate_client
 
+from app.core.errors import DuplicateDocument, InvalidCursor, UsernameTaken
 from app.repositories.document_db import (
     DocumentDB,
     DocumentRow,
     DocumentStatus,
-    DuplicateDocument,
-    InvalidCursor,
-    UsernameTaken,
     decode_cursor,
     encode_cursor,
 )

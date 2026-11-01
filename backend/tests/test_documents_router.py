@@ -5,7 +5,8 @@ from httpx import ASGITransport, AsyncClient
 from app.core.auth import current_user
 from app.core.config import Settings, get_settings
 from app.core.deps import get_document_db, get_document_store
-from app.repositories.document_db import DocumentPage, DocumentRow, InvalidCursor, Scope
+from app.core.errors import InvalidCursor
+from app.repositories.document_db import DocumentPage, DocumentRow, Scope
 from app.routers import documents
 from app.schemas.auth import User
 

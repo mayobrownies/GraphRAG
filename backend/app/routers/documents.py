@@ -20,7 +20,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from app.core.auth import current_user
 from app.core.config import Settings, get_settings
 from app.core.deps import get_document_db, get_document_store
-from app.repositories.document_db import MAX_PAGE_SIZE, DocumentDB, DocumentRow, DocumentStatus, InvalidCursor, Scope
+from app.core.errors import InvalidCursor
+from app.repositories.document_db import MAX_PAGE_SIZE, DocumentDB, DocumentRow, DocumentStatus, Scope
 from app.repositories.document_store import DocumentStore
 from app.schemas.auth import User
 from app.schemas.documents import DocumentList, DocumentRecord, SignedUrl
