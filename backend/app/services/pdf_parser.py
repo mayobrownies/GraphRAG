@@ -15,16 +15,6 @@ def parse_pdf(pdf, doc_id):
         new_after_n_chars=1500,
     )
     # check for issues here
-
-    data = []
-    # unused currently
-    for i, chunk in chunks:
-            data.append({
-                "chunk_id": i,
-                "document_id": doc_id,
-                "chunk": chunk
-            })
-            
     return chunks
 
 
