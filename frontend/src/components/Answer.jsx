@@ -1,14 +1,19 @@
 import { api } from "../api";
 import GraphView from "./GraphView.jsx";
 
+// Ask the backend for a short-lived signed link to the original PDF, then open it in a new tab.
+// The browser downloads straight from storage, so the PDF never passes through our API.
 export async function openSource(docId) {
   const { url } = await api.sourceUrl(docId);
   window.open(url, "_blank", "noopener");
 }
 
+// Renders one answer: the text, warnings (no evidence / partial support), source chunks with page numbers,
+// and the graph path used. Set showGraph={false} to hide the graph (e.g. in side-by-side benchmarks).
 export default function Answer({ result, showGraph = true }) {
   if (!result) return null;
   const g = result.graph || { nodes: [], edges: [], paths: [] };
+  // Flatten every path into the node and relationship ids to highlight inside the graph view.
   const pathNodes = g.paths.flatMap((p) => p.nodes);
   const pathEdges = g.paths.flatMap((p) => p.rels);
   return (
