@@ -57,7 +57,7 @@ async def upload_document(
     override: bool = Form(False),
     user: User = Depends(current_user),
 ) -> DocumentRecord:
-    # TODO: blocked on a jobs.py entry point to start ingestion for a doc_id
+    # TODO: blocked on ingestion.py (the work that jobs.start runs for a doc_id)
     # 1. Read the file; over settings.max_upload_bytes -> 413, not a PDF (content type and %PDF- header) -> 415
     # 2. sha256 of the bytes
     # 3. db.find_duplicate(sha256, user.id)
@@ -106,7 +106,7 @@ async def get_document(
     responses={**NOT_FOUND, status.HTTP_409_CONFLICT: {"description": "Document is not 'failed'"}},
 )
 async def retry_document(doc_id: str, user: User = Depends(current_user)) -> DocumentRecord:
-    # TODO: blocked on a jobs.py entry point to start ingestion for a doc_id
+    # TODO: blocked on ingestion.py (the work that jobs.start runs for a doc_id)
     # 1. find_visible(db, doc_id, user, Scope.OWN) -> 404 otherwise, so global documents can't be retried
     # 2. Status not 'failed' -> 409 (a processing document already has a job; a ready one has nothing to retry)
     # 3. db.update(doc_id, "processing"), which clears the old stage and error
@@ -128,7 +128,7 @@ async def replace_document(
     file: UploadFile = File(...),
     user: User = Depends(current_user),
 ) -> DocumentRecord:
-    # TODO: blocked on jobs.py entry points to cancel the old job and start ingestion for a doc_id
+    # TODO: blocked on ingestion.py; jobs.start already cancels the old job and waits for it to stop
     # 1. Read and check the file as in upload (413, 415); sha256 of the bytes
     # 2. find_visible(db, doc_id, user, Scope.OWN) -> 404 otherwise
     # 3. db.update(doc_id, "processing", name=file.filename, sha256=); DuplicateDocument -> 409
@@ -141,7 +141,7 @@ async def replace_document(
 
 @router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT, responses=NOT_FOUND)
 async def delete_document(doc_id: str, user: User = Depends(current_user)) -> None:
-    # TODO: blocked on jobs.py (cancel a running job) and graph_store.delete_document (not on this branch yet)
+    # TODO: blocked on the Neo4j and Qdrant clients in main.py (jobs.cancel and graph_store.delete_document exist)
     #       Step 2 could ship alone, but the whole route lands together in one change
     # 1. find_visible(db, doc_id, user) -> 404 otherwise
     # 2. Global document: db.hide(user.id, doc_id) and stop; shared data is untouched

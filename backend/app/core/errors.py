@@ -20,6 +20,14 @@ class InvalidCursor(ValueError):
     pass
 
 
+# Jobs
+
+
+class JobCancelled(Exception):
+    # The document was deleted or replaced while its job was running; the job stops before its next write
+    pass
+
+
 # Profiles
 
 

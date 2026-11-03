@@ -7,6 +7,7 @@ from fastapi import Request
 
 from app.repositories.document_db import DocumentDB
 from app.repositories.document_store import DocumentStore
+from app.services.jobs import JobManager
 
 
 def get_document_db(request: Request) -> DocumentDB:
@@ -15,3 +16,7 @@ def get_document_db(request: Request) -> DocumentDB:
 
 def get_document_store(request: Request) -> DocumentStore:
     return request.app.state.document_store
+
+
+def get_jobs(request: Request) -> JobManager:
+    return request.app.state.jobs

@@ -1,6 +1,7 @@
 """
 On startup: graph_store creates the Neo4j constraints, vector_store makes sure the Qdrant collection exists,
 and document_db marks any document stuck in 'processing' from a crash as 'failed' so the user can retry it
+One JobManager runs ingestion jobs; on shutdown it stops them before the Supabase client closes
 Set up logging and register the error handlers from errors.py
 CORS: allow only the origins in config (CORS_ORIGINS)
 Register the account, documents, query, and graph routers under the /api prefix (nginx forwards /api/ to the backend)
@@ -18,6 +19,7 @@ from app.core.config import get_settings
 from app.repositories.document_db import DocumentDB
 from app.repositories.document_store import DocumentStore
 from app.routers import documents
+from app.services.jobs import JobManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ async def lifespan(app: FastAPI):
     supabase = await acreate_client(settings.supabase_url, settings.supabase_secret_key)
     app.state.document_db = DocumentDB(supabase)
     app.state.document_store = DocumentStore(supabase, settings.supabase_storage_bucket)
+    app.state.jobs = JobManager()
 
     # Neo4j: create the client and graph_store constraints here (graph owner)
     # Qdrant: create the client and make sure the collection exists here (vector owner)
@@ -48,6 +51,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Jobs first: a stopping job may still update its document's status through Supabase
+    await app.state.jobs.shutdown()
     await supabase.postgrest.aclose()
 
 
