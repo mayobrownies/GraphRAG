@@ -6,7 +6,6 @@ Raise a clear error for empty, unreadable, encrypted or image-only PDFs so inges
 from pypdf import PdfReader
 from pypdf.errors import FileNotDecryptedError
 from pypdf.errors import EmptyFileError
-import traceback
 
 def parse_pdf(pdf_path, doc_id):
   try:
@@ -53,9 +52,3 @@ def parse_pdf(pdf_path, doc_id):
   except Exception:
     raise Exception("The PDF unreadable.")
 
-try:
-    info = parse_pdf("C:\\Users\\Ian Blanchard\\Desktop\\Actual College\\Parallel and Distributive\\CS-4504-01+W01+W03-Fall2026-PBobbie-Syllabus.pdf", 0)
-    # debug on this line and ensure that it works
-    p = 1 + 1
-except Exception:
-    traceback.print_exc()
