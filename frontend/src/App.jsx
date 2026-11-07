@@ -17,6 +17,7 @@ export default function App() {
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [lastGraph, setLastGraph] = useState(null);
   const [nameError, setNameError] = useState("");
+  const [groupsError, setGroupsError] = useState("");
 
   // On first load: read any existing Supabase session, then subscribe to sign-in/sign-out changes.
   // The returned function unsubscribes when the component unmounts.
@@ -27,14 +28,17 @@ export default function App() {
   }, []);
 
   // Re-fetch the user's groups. The server never returns an empty list (it creates "Group 1").
-  const refreshGroups = () => api.groups().then(setGroups);
+  // A failure is shown under the header, since without groups nothing can be asked or graphed.
+  const refreshGroups = () =>
+    api.groups().then((gs) => { setGroups(gs); setGroupsError(""); })
+      .catch((e) => setGroupsError(`Could not load your groups: ${e.message}`));
 
-  // Once signed in, load the user's profile (custom username) and groups. Failures are ignored here;
-  // the Google name is the fallback and the tabs show their own errors on later calls.
+  // Once signed in, load the user's profile (custom username) and groups. A profile failure is
+  // ignored; the Google name is the fallback.
   useEffect(() => {
     if (!session) return;
     api.me().then(setMe).catch(() => {});
-    refreshGroups().catch(() => {});
+    refreshGroups();
   }, [session]);
 
   // The active group defaults to the first one, and falls back to it if the chosen group disappears.
@@ -81,6 +85,7 @@ export default function App() {
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>
       {nameError && <div className="err" style={{ padding: "0 24px" }}>{nameError}</div>}
+      {groupsError && <div className="err" style={{ padding: "0 24px" }}>{groupsError}</div>}
       <main className={tab === "workspace" ? "fill" : ""}>
         {tab === "workspace" && (
           <Workspace docs={docs} setDocs={setDocs} {...groupProps} refreshGroups={refreshGroups} setLastGraph={setLastGraph} />
