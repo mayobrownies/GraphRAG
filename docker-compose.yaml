@@ -40,7 +40,6 @@ services:
     depends_on: [neo4j, qdrant, ollama]
     restart: on-failure  # Neo4j takes a few seconds to accept connections on first start
     ports: ["8000:8000"]
-    volumes: ["./corpus:/srv/corpus:ro"]
 
   frontend:
     build:

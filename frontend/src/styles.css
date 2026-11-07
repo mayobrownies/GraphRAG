@@ -54,3 +54,10 @@ td, th { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); 
 .prompt-row textarea { flex:1 1 auto; min-height:0; resize:none; }
 .ask-btn { flex:0 0 auto; padding:0 24px; font-size:15px; }
 .prompt-hint { margin-top:6px; }
+/* Group picker above the prompt: the select sizes to its content instead of the full row */
+.prompt-group { margin-bottom:8px; }
+.prompt-group select { width:auto; min-width:180px; }
+
+/* ---- Graph Explorer: one tab button per group, the active one highlighted ---- */
+button.tab { border:1px solid var(--line); background:var(--card); padding:6px 12px; border-radius:6px; cursor:pointer; font-size:14px; }
+button.tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }

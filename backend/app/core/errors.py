@@ -20,6 +20,14 @@ class InvalidCursor(ValueError):
     pass
 
 
+# Groups
+
+
+class GroupNameTaken(Exception):
+    # The (owner_id, name) constraint rejected a second group with the same name
+    pass
+
+
 # Profiles
 
 

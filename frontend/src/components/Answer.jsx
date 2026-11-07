@@ -9,11 +9,11 @@ export async function openSource(docId) {
 }
 
 // Renders one answer: the text, warnings (no evidence / partial support), source chunks with page numbers,
-// and the graph path used. Set showGraph={false} to hide the graph (e.g. in side-by-side benchmarks).
+// and the papers the answer's graph path went through. Set showGraph={false} to hide the graph (e.g. in side-by-side benchmarks).
 export default function Answer({ result, showGraph = true }) {
   if (!result) return null;
   const g = result.graph || { nodes: [], edges: [], paths: [] };
-  // Flatten every path into the node and relationship ids to highlight inside the graph view.
+  // Flatten every path into the paper ids and {source,target} links to highlight inside the graph view.
   const pathNodes = g.paths.flatMap((p) => p.nodes);
   const pathEdges = g.paths.flatMap((p) => p.rels);
   return (
@@ -31,7 +31,7 @@ export default function Answer({ result, showGraph = true }) {
       ))}
       {showGraph && g.nodes.length > 0 && (
         <>
-          <h3 style={{ fontSize: 14 }}>Graph path used ({g.nodes.length} nodes, {g.edges.length} relationships)</h3>
+          <h3 style={{ fontSize: 14 }}>Graph path used ({g.nodes.length} papers, {g.edges.length} links)</h3>
           <GraphView nodes={g.nodes} edges={g.edges} highlightNodes={pathNodes} highlightEdges={pathEdges} />
         </>
       )}

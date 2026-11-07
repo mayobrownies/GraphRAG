@@ -1,11 +1,11 @@
 """
 Qdrant
 Create the collection with the embedding size passed in by the caller, upsert chunk vectors with a payload
-(doc_id, chunk_id, page, account, entity_ids, text), search filtered by doc ids, and delete by doc id
+(doc_id, chunk_id, page, account, text), search filtered by doc ids, and delete by doc id
 Point ids are random UUIDs (Qdrant only accepts UUIDs or ints), so a retry must delete the doc id before inserting again
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import uuid4
 
 from qdrant_client import AsyncQdrantClient
@@ -31,7 +31,6 @@ class ChunkVector:
     page: int
     text: str
     vector: list[float]
-    entity_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -42,7 +41,6 @@ class SearchResult:
     chunk_id: str
     page: int
     text: str
-    entity_ids: list[str]
 
 
 @dataclass
@@ -78,7 +76,6 @@ class VectorStore:
                     "chunk_id": chunk.chunk_id,
                     "page": chunk.page,
                     "account": chunk.account,
-                    "entity_ids": chunk.entity_ids,
                     "text": chunk.text,
                 },
             )
@@ -116,7 +113,6 @@ class VectorStore:
                 chunk_id=point.payload["chunk_id"],
                 page=point.payload["page"],
                 text=point.payload["text"],
-                entity_ids=point.payload.get("entity_ids", []),
             )
             for point in response.points
         ]

@@ -3,23 +3,25 @@ import { api } from "../api";
 import Answer from "./Answer.jsx";
 
 /**
- * Workspace tab: upload PDFs, pick which ready documents to search, and ask questions.
+ * Workspace tab: upload PDFs to the library and ask questions over the active group.
  *
  * Layout (top to bottom, fills the window height - see ".workspace" in styles.css):
  *   1. Upload bar      - fixed height, file picker plus any upload message
- *   2. Documents pane  - the ONLY part that grows and scrolls, so a long document list never
+ *   2. Library pane    - the ONLY part that grows and scrolls, so a long paper list never
  *                        pushes the prompt box off screen
  *   3. Answer pane     - appears only after the user asks something (answer, sources, graph path)
- *   4. Prompt bar      - pinned to the bottom, textbox on the left and the Ask button on the right
+ *   4. Prompt bar      - pinned to the bottom: group picker, textbox, and the Ask button on the right
  *
  * Props (all state is owned by App.jsx so the other tabs can share it):
- *   docs         - list of document records from the API
- *   setDocs      - updates that list
- *   selected     - ids of the documents the user ticked for querying
- *   setSelected  - updates the selection
- *   setLastGraph - hands the latest answer's graph to the Graph Explorer so it can highlight the path
+ *   docs             - the user's library (document records from the API)
+ *   setDocs          - updates that list
+ *   groups           - the user's groups
+ *   activeGroup      - the group questions are asked over
+ *   setActiveGroupId - switches the active group
+ *   refreshGroups    - re-fetches groups (deleting a paper removes it from every group)
+ *   setLastGraph     - hands the latest answer's graph to the Graph Explorer so it can highlight the path
  */
-export default function Workspace({ docs, setDocs, selected, setSelected, setLastGraph }) {
+export default function Workspace({ docs, setDocs, groups, activeGroup, setActiveGroupId, refreshGroups, setLastGraph }) {
   const fileRef = useRef(null);            // hidden handle on the file input (kept for future use)
   const [msg, setMsg] = useState("");          // upload / list error shown in the upload bar
   const [question, setQuestion] = useState(""); // current text in the prompt box
@@ -27,14 +29,14 @@ export default function Workspace({ docs, setDocs, selected, setSelected, setLas
   const [busy, setBusy] = useState(false);      // true while a question is being answered
   const [qError, setQError] = useState("");     // error from the last question, if any
 
-  // Re-fetch the document list from the backend and store it in App's state.
+  // Re-fetch the library from the backend and store it in App's state.
   // Any failure is shown in the upload bar instead of crashing the page.
   const refresh = () => api.documents().then(setDocs).catch((e) => setMsg(e.message));
 
   // Load the list once when the tab first opens.
   useEffect(() => { refresh(); }, []);
 
-  // While any document is still 'processing', poll every 3 seconds so its state flips to
+  // While any paper is still 'processing', poll every 3 seconds so its state flips to
   // 'ready' or 'failed' without the user reloading. The timer is cleared as soon as nothing
   // is processing (or when the component unmounts), so we never poll for no reason.
   useEffect(() => {
@@ -62,17 +64,21 @@ export default function Workspace({ docs, setDocs, selected, setSelected, setLas
     }
   }
 
-  // Tick or untick one document for querying: remove the id if it is already selected,
-  // otherwise add it. (Only 'ready' documents have an enabled checkbox.)
-  const toggle = (id) => setSelected(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  // Delete a paper from the library. The server also drops it from every group, so groups are
+  // re-fetched too, otherwise the Graph Explorer would still count it as a member.
+  async function remove(d) {
+    if (!window.confirm(`Delete "${d.name}" from your library? It is also removed from every group.`)) return;
+    try { await api.remove(d.id); await Promise.all([refresh(), refreshGroups()]); }
+    catch (e) { setMsg(e.message); }
+  }
 
-  // Send the question and the selected document ids to the backend (GraphRAG mode).
+  // Send the question and the active group's id to the backend.
   // Clears the previous answer first so stale results never sit next to a new question, then
   // stores the new answer and passes its graph up so the Graph Explorer can highlight the path.
   async function ask() {
     setBusy(true); setQError(""); setResult(null);
     try {
-      const r = await api.query(question, selected, "graph");
+      const r = await api.query(question, activeGroup.id);
       setResult(r); setLastGraph(r.graph);
     } catch (e) { setQError(e.message); }
     setBusy(false);
@@ -88,15 +94,19 @@ export default function Workspace({ docs, setDocs, selected, setSelected, setLas
     }
   }
 
-  // The Ask button and the Enter shortcut share this one rule: not already working, a
-  // question of at least 3 characters, and at least one document selected.
-  const canAsk = !busy && question.trim().length >= 3 && selected.length > 0;
+  // Only ready papers of the active group can be searched.
+  const members = new Set(activeGroup?.document_ids || []);
+  const readyCount = docs.filter((d) => d.status === "ready" && members.has(d.id)).length;
 
-  // Small helper line under the prompt. When Ask is disabled because nothing is selected we
-  // say why, instead of leaving the user with a silently greyed-out button.
-  const hint = selected.length === 0
-    ? "Tick at least one ready document above to ask a question."
-    : `${selected.length} document(s) selected`;
+  // The Ask button and the Enter shortcut share this one rule: not already working, a
+  // question of at least 3 characters, and at least one ready paper in the active group.
+  const canAsk = !busy && question.trim().length >= 3 && readyCount > 0;
+
+  // Small helper line under the prompt. When Ask is disabled because the group has nothing
+  // searchable we say why, instead of leaving the user with a silently greyed-out button.
+  const hint = readyCount === 0
+    ? "This group has no ready papers. Add ready papers to it in the Graph Explorer."
+    : `${readyCount} ready paper(s) in this group`;
 
   // The answer pane is shown while waiting, on success, and on error.
   const showAnswerPane = busy || result || qError;
@@ -105,34 +115,34 @@ export default function Workspace({ docs, setDocs, selected, setSelected, setLas
     <div className="workspace">
       {/* 1. Upload bar: fixed height at the top */}
       <section className="card upload-bar">
-        <h2>Documents</h2>
+        <h2>Library</h2>
         <input ref={fileRef} type="file" accept="application/pdf" onChange={upload} />
         {msg && <div className="err">{msg}</div>}
       </section>
 
-      {/* 2. Documents pane: takes the leftover height and scrolls on its own */}
+      {/* 2. Library pane: takes the leftover height and scrolls on its own */}
       <section className="card pane docs-pane">
         <div className="scroll">
           <table>
-            <thead><tr><th></th><th>Name</th><th>State</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>State</th><th></th></tr></thead>
             <tbody>
               {docs.map((d) => (
                 <tr key={d.id}>
-                  <td><input type="checkbox" disabled={d.status !== "ready"} checked={selected.includes(d.id)} onChange={() => toggle(d.id)} /></td>
-                  <td>{d.name} {d.is_global && <span className="muted">(global corpus)</span>}</td>
+                  <td>{d.name}</td>
                   <td>
                     <span className={`badge ${d.status}`}>{d.status}</span>
                     {d.status === "processing" && <div className="muted">{d.stage}</div>}
                     {d.status === "failed" && <div className="err">{d.error}</div>}
                   </td>
                   <td>
-                    {d.status === "failed" && !d.is_global && <button className="link" onClick={() => api.retry(d.id).then(refresh)}>Retry</button>}
-                    {!d.is_global && <button className="link" onClick={() => window.confirm("Delete this document and its index?") && api.remove(d.id).then(refresh)}>Delete</button>}
+                    {d.status === "failed" && <button className="link" onClick={() => api.retry(d.id).then(refresh)}>Retry</button>}
+                    <button className="link" onClick={() => remove(d)}>Delete</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {docs.length === 0 && <p className="muted">Your library is empty. Upload a PDF above.</p>}
         </div>
       </section>
 
@@ -150,13 +160,19 @@ export default function Workspace({ docs, setDocs, selected, setSelected, setLas
 
       {/* 4. Prompt bar: pinned to the bottom, Ask button on the right of the textbox */}
       <section className="card prompt-bar">
+        <div className="row prompt-group">
+          <label className="muted" htmlFor="ask-group">Ask over group</label>
+          <select id="ask-group" value={activeGroup?.id || ""} onChange={(e) => setActiveGroupId(e.target.value)}>
+            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </div>
         <div className="prompt-row">
           <textarea
             rows={2}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onPromptKeyDown}
-            placeholder="Ask about the selected documents (Enter to send, Shift+Enter for a new line)"
+            placeholder="Ask about the papers in this group (Enter to send, Shift+Enter for a new line)"
           />
           <button className="primary ask-btn" disabled={!canAsk} onClick={ask}>
             {busy ? "Working..." : "Ask"}

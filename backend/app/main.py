@@ -3,7 +3,7 @@ On startup: graph_store creates the Neo4j constraints, vector_store makes sure t
 and document_db marks any document stuck in 'processing' from a crash as 'failed' so the user can retry it
 Set up logging and register the error handlers from errors.py
 CORS: allow only the origins in config (CORS_ORIGINS)
-Register the account, documents, query, and graph routers under the /api prefix (nginx forwards /api/ to the backend)
+Register the documents and groups routers under the /api prefix (nginx forwards /api/ to the backend)
 GET /health returns {"status": "ok"} for Render's health check (or which ever service we end up using)
 """
 
@@ -17,7 +17,8 @@ from supabase import acreate_client
 from app.core.config import get_settings
 from app.repositories.document_db import DocumentDB
 from app.repositories.document_store import DocumentStore
-from app.routers import documents
+from app.repositories.graph_store import GraphStore
+from app.routers import documents, groups
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     missing = [
         name
-        for name in ("supabase_url", "supabase_secret_key", "supabase_storage_bucket")
+        for name in (
+            "supabase_url", "supabase_secret_key", "supabase_storage_bucket",
+            "neo4j_uri", "neo4j_username", "neo4j_password",
+        )
         if not getattr(settings, name)
     ]
     if missing:
@@ -38,7 +42,11 @@ async def lifespan(app: FastAPI):
     app.state.document_db = DocumentDB(supabase)
     app.state.document_store = DocumentStore(supabase, settings.supabase_storage_bucket)
 
-    # Neo4j: create the client and graph_store constraints here (graph owner)
+    app.state.graph_store = GraphStore.connect(
+        settings.neo4j_uri, settings.neo4j_username, settings.neo4j_password, settings.neo4j_database or "neo4j"
+    )
+    await app.state.graph_store.create_constraints()
+
     # Qdrant: create the client and make sure the collection exists here (vector owner)
 
     # No job survives a restart, so anything still 'processing' has stopped
@@ -48,6 +56,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await app.state.graph_store.close()
     await supabase.postgrest.aclose()
 
 
@@ -62,6 +71,7 @@ app.add_middleware(
 )
 
 app.include_router(documents.router, prefix="/api")
+app.include_router(groups.router, prefix="/api")
 
 
 @app.get("/health")
