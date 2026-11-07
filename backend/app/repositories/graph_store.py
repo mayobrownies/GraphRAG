@@ -71,9 +71,9 @@ class GraphStore:
         if type(value) is not int or not 1 <= value <= 200:
             raise ValueError(f"{field} must be between 1 and 200")
 
-    async def _lock(self, tx):
-        # Serializes paper writes so papers added at the same time still link to each other.
-        await self._run(tx, "MERGE (l:PaperGraphLock {name:'papers'}) SET l.writes=coalesce(l.writes,0)+1")
+    async def _lock(self, tx, account):
+        # Serializes one account's paper writes so papers added at the same time still link to each other.
+        await self._run(tx, "MERGE (l:PaperGraphLock {name:$account}) SET l.writes=coalesce(l.writes,0)+1", account=account)
 
     async def _remove_edges(self, tx, doc_id):
         await self._run(tx, "MATCH (:Paper {doc_id:$doc_id})-[r:ASSOCIATED_WITH]-() DELETE r", doc_id=doc_id)
@@ -83,7 +83,7 @@ class GraphStore:
         required_text(account, "account")
         self._scope([doc_id])
         async def begin(tx):
-            await self._lock(tx)
+            await self._lock(tx, account)
             rows = await self._run(tx, """
                 MERGE (p:Paper {doc_id:$doc_id})
                 ON CREATE SET p.revision=0
@@ -96,14 +96,14 @@ class GraphStore:
         return await self._write(begin)
 
     async def add_paper(self, account: str, revision: int, paper: Paper, min_weight: float = MIN_WEIGHT) -> list[dict]:
-        """Store the embedding and link the paper to every active paper at or above min_weight."""
+        """Store the embedding and link the paper to every active paper of the same account at or above min_weight."""
         required_text(account, "account")
         if type(revision) is not int or revision < 1:
             raise ValueError("revision must be a positive integer")
         if type(min_weight) not in (int, float) or not -1 <= min_weight <= 1:
             raise ValueError("min_weight must be between -1 and 1")
         async def insert(tx):
-            await self._lock(tx)
+            await self._lock(tx, account)
             rows = await self._run(tx, """
                 MATCH (p:Paper {doc_id:$doc_id})
                 WHERE p.active=true AND p.revision=$revision AND p.account=$account
@@ -116,14 +116,14 @@ class GraphStore:
             await self._remove_edges(tx, paper.doc_id)
             # vector.similarity.cosine is scaled to [0, 1]; convert back to [-1, 1].
             return await self._run(tx, """
-                MATCH (p:Paper {doc_id:$doc_id}), (o:Paper)
+                MATCH (p:Paper {doc_id:$doc_id}), (o:Paper {account:$account})
                 WHERE o.active=true AND o.embedding IS NOT NULL AND o.doc_id<>p.doc_id
                 WITH p, o, 2*vector.similarity.cosine(p.embedding, o.embedding)-1 AS weight
                 WHERE weight >= $min_weight
                 CREATE (p)-[:ASSOCIATED_WITH {weight:weight}]->(o)
                 RETURN o.doc_id AS doc_id, weight
                 ORDER BY weight DESC, doc_id
-            """, doc_id=paper.doc_id, min_weight=min_weight)
+            """, doc_id=paper.doc_id, account=account, min_weight=min_weight)
         return await self._write(insert)
 
     async def delete_document(self, account: str, doc_id: str):
@@ -131,7 +131,7 @@ class GraphStore:
         required_text(account, "account")
         self._scope([doc_id])
         async def delete(tx):
-            await self._lock(tx)
+            await self._lock(tx, account)
             await self._run(tx, """
                 MERGE (p:Paper {doc_id:$doc_id})
                 ON CREATE SET p.revision=0, p.account=$account

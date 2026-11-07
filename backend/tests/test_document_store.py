@@ -20,10 +20,6 @@ def test_path_for_own_document():
     assert DocumentStore.path_for("doc-1", "user-1") == "user-1/doc-1.pdf"
 
 
-def test_path_for_global_document():
-    assert DocumentStore.path_for("doc-1", None) == "global/doc-1.pdf"
-
-
 @pytest.fixture
 async def store():
     client = await acreate_client(SUPABASE_TEST_URL, SUPABASE_TEST_KEY)

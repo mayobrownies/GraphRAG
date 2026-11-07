@@ -15,7 +15,6 @@ class DocumentRecord(BaseModel):
 
     id: str
     name: str
-    is_global: bool
     status: DocumentStatus
     # Progress message while processing, and a short user-facing message when failed
     stage: str | None

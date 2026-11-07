@@ -6,27 +6,25 @@ from app.core.auth import current_user
 from app.core.config import Settings, get_settings
 from app.core.deps import get_document_db, get_document_store
 from app.core.errors import InvalidCursor
-from app.repositories.document_db import DocumentPage, DocumentRow, Scope
+from app.repositories.document_db import DocumentPage, DocumentRow
 from app.routers import documents
 from app.schemas.auth import User
 
 ALICE = "8f14e45f-ceea-4e7a-9f6e-1c2b3d4e5f60"
 BOB = "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"
 OWN_ID = "3c9e1a2b-4d5f-4a6b-8c7d-9e0f1a2b3c4d"
-GLOBAL_ID = "4d0f2b3c-5e6a-4b7c-9d8e-0f1a2b3c4d5e"
 BOBS_ID = "5e1a3c4d-6f7b-4c8d-0e9f-1a2b3c4d5e6f"
 PDF = {"file": ("paper.pdf", b"%PDF-1.7\n", "application/pdf")}
 EXPIRES = 120
 
 
-def row(doc_id: str, owner_id: str | None, name: str) -> DocumentRow:
+def row(doc_id: str, owner_id: str, name: str) -> DocumentRow:
     return DocumentRow(
         id=doc_id,
         owner_id=owner_id,
-        is_global=owner_id is None,
         name=name,
         sha256="hash-" + doc_id,
-        storage_path=f"{owner_id or 'global'}/{doc_id}.pdf",
+        storage_path=f"{owner_id}/{doc_id}.pdf",
         status="ready",
         stage=None,
         error=None,
@@ -36,19 +34,19 @@ def row(doc_id: str, owner_id: str | None, name: str) -> DocumentRow:
 
 
 class FakeDB:
-    # In-memory stand-in for DocumentDB: own documents plus global ones, and records get_all's arguments
+    # In-memory stand-in for DocumentDB: each user sees only their own documents; records get_all's arguments
     def __init__(self):
-        self.rows = [row(OWN_ID, ALICE, "mine.pdf"), row(GLOBAL_ID, None, "shared.pdf"), row(BOBS_ID, BOB, "bobs.pdf")]
+        self.rows = [row(OWN_ID, ALICE, "mine.pdf"), row(BOBS_ID, BOB, "bobs.pdf")]
         self.get_all_args = None
 
-    async def get(self, doc_id, user_id, *, scope=Scope.ALL):
-        return next((r for r in self.rows if r.id == doc_id and r.owner_id in (user_id, None)), None)
+    async def get(self, doc_id, user_id):
+        return next((r for r in self.rows if r.id == doc_id and r.owner_id == user_id), None)
 
     async def get_all(self, user_id, **kwargs):
         self.get_all_args = kwargs
         if kwargs.get("cursor") == "bad":
             raise InvalidCursor("bad")
-        visible = [r for r in self.rows if r.owner_id in (user_id, None)]
+        visible = [r for r in self.rows if r.owner_id == user_id]
         return DocumentPage(items=visible, next_cursor="next-page")
 
 
@@ -117,7 +115,7 @@ async def test_unimplemented_routes_are_501(method, path, files):
     assert response.status_code == 501
 
 
-@pytest.mark.parametrize("params", [{"limit": 500}, {"limit": 0}, {"scope": "bogus"}, {"status": "done"}])
+@pytest.mark.parametrize("params", [{"limit": 500}, {"limit": 0}, {"status": "done"}])
 async def test_list_rejects_bad_query_params(params):
     response = await send(make_app(), "GET", "/api/documents", params=params)
     assert response.status_code == 422
@@ -135,15 +133,15 @@ async def test_list_returns_public_fields_and_next_cursor(db):
     response = await send(make_app(db), "GET", "/api/documents")
     assert response.status_code == 200
     body = response.json()
-    assert [item["id"] for item in body["items"]] == [OWN_ID, GLOBAL_ID]
+    assert [item["id"] for item in body["items"]] == [OWN_ID]
     assert body["next_cursor"] == "next-page"
-    assert set(body["items"][0]) == {"id", "name", "is_global", "status", "stage", "error", "created_at", "updated_at"}
+    assert set(body["items"][0]) == {"id", "name", "status", "stage", "error", "created_at", "updated_at"}
 
 
 async def test_list_passes_filters_through(db):
-    params = {"scope": "own", "status": "ready", "search": "brca", "limit": 10, "cursor": "abc"}
+    params = {"status": "ready", "search": "brca", "limit": 10, "cursor": "abc"}
     await send(make_app(db), "GET", "/api/documents", params=params)
-    assert db.get_all_args == {"scope": Scope.OWN, "status": "ready", "search": "brca", "limit": 10, "cursor": "abc"}
+    assert db.get_all_args == {"status": "ready", "search": "brca", "limit": 10, "cursor": "abc"}
 
 
 async def test_list_bad_cursor_is_400(db):
@@ -154,11 +152,10 @@ async def test_list_bad_cursor_is_400(db):
 # get
 
 
-@pytest.mark.parametrize("doc_id", [OWN_ID, GLOBAL_ID])
-async def test_get_returns_visible_documents(db, doc_id):
-    response = await send(make_app(db), "GET", f"/api/documents/{doc_id}")
+async def test_get_returns_own_document(db):
+    response = await send(make_app(db), "GET", f"/api/documents/{OWN_ID}")
     assert response.status_code == 200
-    assert response.json()["id"] == doc_id
+    assert response.json()["id"] == OWN_ID
 
 
 @pytest.mark.parametrize("doc_id", [BOBS_ID, "00000000-0000-4000-8000-000000000000", "not-a-uuid"])
@@ -172,9 +169,9 @@ async def test_get_hides_whether_a_document_exists(db, doc_id):
 
 
 async def test_download_signs_the_stored_path(db, store):
-    response = await send(make_app(db, store), "GET", f"/api/documents/{GLOBAL_ID}/download")
+    response = await send(make_app(db, store), "GET", f"/api/documents/{OWN_ID}/download")
     assert response.status_code == 200
-    assert response.json() == {"url": f"https://signed/global/{GLOBAL_ID}.pdf?e={EXPIRES}", "expires_in": EXPIRES}
+    assert response.json() == {"url": f"https://signed/{ALICE}/{OWN_ID}.pdf?e={EXPIRES}", "expires_in": EXPIRES}
 
 
 async def test_download_of_another_users_document_is_404(db, store):

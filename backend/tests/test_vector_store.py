@@ -12,7 +12,6 @@ def chunk(doc_id: str, chunk_id: str, vector: list[float]) -> ChunkVector:
         page=1,
         text=f"text of {chunk_id}",
         vector=vector,
-        entity_ids=[f"entity-{chunk_id}"],
     )
 
 
@@ -59,7 +58,6 @@ async def test_search_ranks_by_similarity_and_filters_by_doc(store):
     results = await store.search([0.9, 0.1, 0], doc_ids=["doc-a"], limit=5)
     assert [r.chunk_id for r in results] == ["a1", "a2"]
     assert results[0].score > results[1].score
-    assert results[0].entity_ids == ["entity-a1"]
     assert results[0].page == 1 and results[0].text == "text of a1"
 
 

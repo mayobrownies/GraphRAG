@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from supabase import acreate_client
 
-from app.core.errors import DuplicateDocument, InvalidCursor, UsernameTaken
+from app.core.errors import DuplicateDocument, GroupNameTaken, InvalidCursor, UsernameTaken
 from app.repositories.document_db import (
     DocumentDB,
     DocumentRow,
@@ -45,7 +45,7 @@ async def test_update_rejects_invalid_changes(kwargs):
         await DocumentDB(client=None).update(str(uuid4()), **kwargs)
 
 
-@pytest.mark.parametrize("kwargs", [{"scope": "everyone"}, {"limit": 0}, {"limit": 101}, {"cursor": "not-a-cursor"}])
+@pytest.mark.parametrize("kwargs", [{"limit": 0}, {"limit": 101}, {"cursor": "not-a-cursor"}])
 async def test_get_all_rejects_invalid_arguments(kwargs):
     with pytest.raises(ValueError):
         await DocumentDB(client=None).get_all(str(uuid4()), **kwargs)
@@ -53,7 +53,7 @@ async def test_get_all_rejects_invalid_arguments(kwargs):
 
 def test_cursor_round_trips():
     doc_id = str(uuid4())
-    row = DocumentRow(doc_id, None, True, "a.pdf", "h", "p", "ready", None, None,
+    row = DocumentRow(doc_id, str(uuid4()), "a.pdf", "h", "p", "ready", None, None,
                       "2026-10-21T12:00:00.123456+00:00", "2026-10-21T12:00:00.123456+00:00")
     assert decode_cursor(encode_cursor(row)) == ("2026-10-21T12:00:00.123456+00:00", doc_id)
 
@@ -73,7 +73,7 @@ def b64(text: str) -> str:
         b64('[1, "8f14e45f-ceea-4e7a-9f6e-1c2b3d4e5f60"]'),
         # Filter injection attempts must not survive decoding
         b64('["2026-10-21T12:00:00+00:00,owner_id.is.null", "8f14e45f-ceea-4e7a-9f6e-1c2b3d4e5f60"]'),
-        b64('["2026-10-21T12:00:00+00:00", "x),is_global.is.true"]'),
+        b64('["2026-10-21T12:00:00+00:00", "x),status.eq.ready"]'),
     ],
 )
 def test_bad_cursors_are_rejected(cursor):
@@ -84,12 +84,20 @@ def test_bad_cursors_are_rejected(cursor):
 async def test_user_id_must_be_a_uuid():
     # It goes into a PostgREST filter string, so anything else could add filters
     with pytest.raises(ValueError):
-        await DocumentDB(client=None).get_all("x,is_global.is.false")
+        await DocumentDB(client=None).get_all("x,owner_id.neq.x")
 
 
-async def test_user_id_required_outside_global_scope():
+async def test_user_id_is_required():
     with pytest.raises(ValueError):
-        await DocumentDB(client=None).get_all(None, scope="own")
+        await DocumentDB(client=None).get_all(None)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 101])
+async def test_group_names_are_1_to_100_characters(name):
+    with pytest.raises(ValueError):
+        await DocumentDB(client=None).create_group(str(uuid4()), name)
+    with pytest.raises(ValueError):
+        await DocumentDB(client=None).rename_group(str(uuid4()), str(uuid4()), name)
 
 
 @pytest.mark.parametrize("username", ["ab", "x" * 31, "   "])
@@ -123,21 +131,9 @@ async def users(client):
         await client.auth.admin.delete_user(user_id)
 
 
-@pytest.fixture
-async def global_ids(client):
-    # Global documents have no owner to cascade from, so delete them explicitly
-    ids = []
-    yield ids
-    if ids:
-        await client.table("documents").delete().in_("id", ids).execute()
-
-
-async def add(db, owner_id, *, sha256=None, name="paper.pdf", global_ids=None):
+async def add(db, owner_id, *, sha256=None, name="paper.pdf"):
     doc_id = str(uuid4())
-    document = await db.create(doc_id, owner_id, name, sha256 or uuid4().hex, f"{owner_id or 'global'}/{doc_id}.pdf")
-    if owner_id is None:
-        global_ids.append(doc_id)
-    return document
+    return await db.create(doc_id, owner_id, name, sha256 or uuid4().hex, f"{owner_id}/{doc_id}.pdf")
 
 
 @needs_supabase
@@ -145,25 +141,8 @@ async def test_users_only_see_their_own_documents(db, users):
     alice, bob = users
     document = await add(db, bob)
     assert await db.get(document.id, alice) is None
-    assert await db.get(document.id, bob, scope="own") == document
+    assert await db.get(document.id, bob) == document
     assert document.id not in [d.id for d in (await db.get_all(alice)).items]
-
-
-@needs_supabase
-async def test_hiding_a_global_document_only_affects_that_user(db, users, global_ids):
-    alice, bob = users
-    document = await add(db, None, global_ids=global_ids)
-    assert await db.get(document.id, alice) is not None
-    assert await db.hide(alice, document.id) is True
-    assert await db.hide(alice, document.id) is True  # hiding twice is harmless
-    assert await db.get(document.id, alice) is None
-    assert await db.get(document.id, bob) is not None
-
-
-@needs_supabase
-async def test_hide_rejects_own_documents(db, users):
-    document = await add(db, users[0])
-    assert await db.hide(users[0], document.id) is False
 
 
 @needs_supabase
@@ -174,24 +153,23 @@ async def test_get_all_filters_and_paginates(db, users):
     other = await add(db, alice, name="statins.pdf")
     await db.update(other.id, "ready")
 
-    first = await db.get_all(alice, scope="own", search="brca1_", limit=2)
-    second = await db.get_all(alice, scope="own", search="brca1_", limit=2, cursor=first.next_cursor)
+    first = await db.get_all(alice, search="brca1_", limit=2)
+    second = await db.get_all(alice, search="brca1_", limit=2, cursor=first.next_cursor)
     assert len(first.items) == 2 and first.next_cursor
     assert len(second.items) == 1 and second.next_cursor is None
     assert not {d.id for d in first.items} & {d.id for d in second.items}
 
-    ready = await db.get_all(alice, scope="own", status="ready")
+    ready = await db.get_all(alice, status="ready")
     assert [d.id for d in ready.items] == [other.id]
     assert ready.next_cursor is None
 
 
 @needs_supabase
-async def test_cursor_pages_keep_the_scope_filter(db, users, global_ids):
-    # Scope "all" already sends an or= filter; the cursor adds a second one, and both must apply
+async def test_cursor_pages_keep_the_owner_filter(db, users):
+    # The cursor sends an or= filter; the owner filter must still apply alongside it
     alice, bob = users
     tag = uuid4().hex[:8]
     mine = [await add(db, alice, name=f"{tag}_{i}.pdf") for i in range(3)]
-    shared = await add(db, None, name=f"{tag}_global.pdf", global_ids=global_ids)
     await add(db, bob, name=f"{tag}_bob.pdf")
 
     seen, cursor = [], None
@@ -202,24 +180,17 @@ async def test_cursor_pages_keep_the_scope_filter(db, users, global_ids):
             break
         cursor = page.next_cursor
 
-    # Every visible document exactly once, newest first, and never bob's
-    expected = sorted(mine + [shared], key=lambda d: (datetime.fromisoformat(d.created_at), d.id), reverse=True)
+    # Every one of alice's documents exactly once, newest first, and never bob's
+    expected = sorted(mine, key=lambda d: (datetime.fromisoformat(d.created_at), d.id), reverse=True)
     assert seen == [d.id for d in expected]
 
 
 @needs_supabase
-async def test_find_duplicate_checks_own_then_visible_global(db, users, global_ids):
+async def test_find_duplicate_checks_only_own_documents(db, users):
     alice, bob = users
     own = await add(db, alice)
-    shared = await add(db, None, global_ids=global_ids)
-
     assert (await db.find_duplicate(own.sha256, alice)).id == own.id
     assert await db.find_duplicate(own.sha256, bob) is None
-    assert (await db.find_duplicate(shared.sha256, alice)).id == shared.id
-    assert (await db.find_duplicate(shared.sha256, None)).id == shared.id
-
-    await db.hide(alice, shared.id)
-    assert await db.find_duplicate(shared.sha256, alice) is None
 
 
 @needs_supabase
@@ -232,7 +203,7 @@ async def test_same_file_twice_raises_duplicate(db, users):
 
 
 @needs_supabase
-async def test_ready_ids_keeps_only_visible_ready_documents(db, users):
+async def test_ready_ids_keeps_only_own_ready_documents(db, users):
     alice, bob = users
     ready = await add(db, alice)
     processing = await add(db, alice)
@@ -249,7 +220,7 @@ async def test_ready_ids_keeps_only_visible_ready_documents(db, users):
 @needs_supabase
 async def test_update_status_clears_old_stage_and_error(db, users):
     document = await add(db, users[0])
-    assert await db.update(document.id, stage="Extracting entities") is True
+    assert await db.update(document.id, stage="Embedding paper") is True
     await db.update(document.id, "failed", error="Unreadable PDF")
     failed = await db.get(document.id, users[0])
     assert failed.status is DocumentStatus.FAILED and failed.error == "Unreadable PDF" and failed.stage is None
@@ -272,12 +243,10 @@ async def test_update_replaces_file_details(db, users):
 
 
 @needs_supabase
-async def test_delete_only_removes_own_documents(db, users, global_ids):
+async def test_delete_only_removes_own_documents(db, users):
     alice, bob = users
     bobs = await add(db, bob)
-    shared = await add(db, None, global_ids=global_ids)
     assert await db.delete(bobs.id, alice) is False
-    assert await db.delete(shared.id, alice) is False
     assert await db.delete(bobs.id, bob) is True
     assert await db.get(bobs.id, bob) is None
 
@@ -288,6 +257,96 @@ async def test_fail_stuck_marks_processing_as_failed(db, users):
     assert await db.fail_stuck() >= 1
     stuck = await db.get(document.id, users[0])
     assert stuck.status is DocumentStatus.FAILED and stuck.error
+
+
+# Groups
+
+
+@needs_supabase
+async def test_first_list_creates_group_1_once(db, users):
+    alice = users[0]
+    first = await db.get_groups(alice)
+    assert [(g.name, g.document_ids) for g in first] == [("Group 1", [])]
+    assert await db.get_groups(alice) == first
+
+
+@needs_supabase
+async def test_deleting_the_last_group_brings_back_group_1(db, users):
+    alice = users[0]
+    (only,) = await db.get_groups(alice)
+    assert await db.delete_group(only.id, alice) is True
+    (again,) = await db.get_groups(alice)
+    assert again.name == "Group 1" and again.id != only.id
+
+
+@needs_supabase
+async def test_group_names_are_unique_per_user(db, users):
+    alice, bob = users
+    medical = await db.create_group(alice, "  Medical  ")
+    assert medical.name == "Medical"
+    with pytest.raises(GroupNameTaken):
+        await db.create_group(alice, "Medical")
+    # Another user can use the same name
+    await db.create_group(bob, "Medical")
+
+    ai = await db.create_group(alice, "AI")
+    with pytest.raises(GroupNameTaken):
+        await db.rename_group(ai.id, alice, "Medical")
+    assert (await db.rename_group(ai.id, alice, "AI research")).name == "AI research"
+
+
+@needs_supabase
+async def test_users_cannot_touch_other_users_groups(db, users):
+    alice, bob = users
+    group = await db.create_group(bob, "Bob's")
+    paper = await add(db, alice)
+    assert await db.get_group(group.id, alice) is None
+    assert group.id not in [g.id for g in await db.get_groups(alice)]
+    assert await db.rename_group(group.id, alice, "Mine now") is None
+    assert await db.add_to_group(group.id, paper.id, alice) is False
+    assert await db.delete_group(group.id, alice) is False
+    assert (await db.get_group(group.id, bob)).name == "Bob's"
+
+
+@needs_supabase
+async def test_groups_hold_only_their_owners_papers(db, users):
+    alice, bob = users
+    group = await db.create_group(alice, "Medical")
+    bobs = await add(db, bob)
+    assert await db.add_to_group(group.id, bobs.id, alice) is False
+    assert await db.add_to_group(group.id, bobs.id, bob) is False
+    assert (await db.get_group(group.id, alice)).document_ids == []
+
+
+@needs_supabase
+async def test_membership_add_remove_and_cascades(db, users):
+    alice = users[0]
+    medical = await db.create_group(alice, "Medical")
+    ai = await db.create_group(alice, "AI")
+    first, second = await add(db, alice), await add(db, alice)
+
+    assert await db.add_to_group(medical.id, first.id, alice) is True
+    assert await db.add_to_group(medical.id, first.id, alice) is True  # adding twice is harmless
+    assert await db.add_to_group(medical.id, second.id, alice) is True
+    assert await db.add_to_group(ai.id, first.id, alice) is True  # one paper, several groups
+    assert (await db.get_group(medical.id, alice)).document_ids == [first.id, second.id]
+
+    # Removing from a group keeps the paper in the library and in its other groups
+    assert await db.remove_from_group(medical.id, first.id, alice) is True
+    assert await db.remove_from_group(medical.id, first.id, alice) is False
+    assert (await db.get_group(medical.id, alice)).document_ids == [second.id]
+    assert (await db.get_group(ai.id, alice)).document_ids == [first.id]
+    assert await db.get(first.id, alice) is not None
+
+    # Deleting a group keeps its papers; deleting a paper removes it from every group
+    assert await db.delete_group(ai.id, alice) is True
+    assert await db.get(first.id, alice) is not None
+    await db.add_to_group(medical.id, first.id, alice)
+    assert await db.delete(second.id, alice) is True
+    assert (await db.get_group(medical.id, alice)).document_ids == [first.id]
+
+
+# Profiles
 
 
 @needs_supabase

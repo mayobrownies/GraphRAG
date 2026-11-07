@@ -1,7 +1,7 @@
 """
 Supabase Storage: the private bucket (SUPABASE_STORAGE_BUCKET) that holds the original PDFs
 Upload, download, replace and delete PDFs, and create signed URLs to open a source PDF
-Paths are {owner_id or "global"}/{doc_id}.pdf, so a retry or replace keeps the same path; store it in documents.storage_path
+Paths are {owner_id}/{doc_id}.pdf, so a retry or replace keeps the same path; store it in documents.storage_path
 The documents table (metadata and processing state) lives in document_db.py; the SDD's "Document Store" covers both
 """
 
@@ -18,9 +18,8 @@ class DocumentStore:
     bucket: str
 
     @staticmethod
-    def path_for(doc_id: str, owner_id: str | None) -> str:
-        # owner_id None means a global corpus document
-        return f"{owner_id or 'global'}/{doc_id}.pdf"
+    def path_for(doc_id: str, owner_id: str) -> str:
+        return f"{owner_id}/{doc_id}.pdf"
 
     async def upload(self, path: str, data: bytes) -> str:
         # Fails if a file already exists at this path; use replace to overwrite

@@ -32,26 +32,39 @@ export const api = {
   // Current user's profile
   me: () => request("/api/me"),
   setUsername: (username) => request("/api/me/username", { method: "PUT", json: { username } }),
-  // Documents: the list endpoint is paged (default 50); this returns only the first page's items
-  documents: () => request("/api/documents").then((page) => page.items),
+  // Library: the list endpoint is paged; follow next_cursor until the server says there is no more
+  documents: async () => {
+    const items = [];
+    let cursor = null;
+    do {
+      const page = await request(`/api/documents?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+      items.push(...page.items);
+      cursor = page.next_cursor;
+    } while (cursor);
+    return items;
+  },
+  // The backend reads override as a form field, so it goes into the multipart body
   upload: (file, override = false) => {
     const form = new FormData();
     form.append("file", file);
-    return request(`/api/documents?override=${override}`, { method: "POST", body: form });
+    form.append("override", String(override));
+    return request("/api/documents", { method: "POST", body: form });
   },
   retry: (id) => request(`/api/documents/${id}/retry`, { method: "POST" }),
   remove: (id) => request(`/api/documents/${id}`, { method: "DELETE" }),
   sourceUrl: (id) => request(`/api/documents/${id}/download`),
-  // Ask a question over the given documents; mode is "graph" (GraphRAG) or standard RAG
-  query: (question, doc_ids, mode = "graph") =>
-    request("/api/query", { method: "POST", json: { question, doc_ids, mode } }),
-  // Run the same question through Standard RAG and GraphRAG for the Benchmarks tab
-  benchmark: (question, doc_ids) =>
-    request("/api/benchmark", { method: "POST", json: { question, doc_ids } }),
-  // Graph Explorer: search/filter the graph, list node types, expand a node, or inspect one node
-  graph: (docIds, search = "", types = []) =>
-    request(`/api/graph?doc_ids=${docIds.join(",")}&search=${encodeURIComponent(search)}&types=${types.join(",")}`),
-  graphTypes: () => request("/api/graph/types"),
-  expand: (id, docIds) => request(`/api/graph/expand/${id}?doc_ids=${docIds.join(",")}`),
-  node: (id, docIds) => request(`/api/graph/node/${id}?doc_ids=${docIds.join(",")}`),
+  // Groups: named sets of library papers. Membership calls return the updated group record.
+  groups: () => request("/api/groups"),
+  createGroup: (name) => request("/api/groups", { method: "POST", json: { name } }),
+  renameGroup: (id, name) => request(`/api/groups/${id}`, { method: "PATCH", json: { name } }),
+  deleteGroup: (id) => request(`/api/groups/${id}`, { method: "DELETE" }),
+  addToGroup: (id, docId) => request(`/api/groups/${id}/documents/${docId}`, { method: "PUT" }),
+  removeFromGroup: (id, docId) => request(`/api/groups/${id}/documents/${docId}`, { method: "DELETE" }),
+  // Paper graph of a group's ready papers, optionally filtered by paper name
+  groupGraph: (id, search = "") =>
+    request(`/api/groups/${id}/graph?search=${encodeURIComponent(search)}&limit=50&per_paper=5`),
+  // Ask a question over the papers of one group
+  query: (question, group_id) => request("/api/query", { method: "POST", json: { question, group_id } }),
+  // Run the same question through Standard RAG and GraphRAG over one group for the Benchmarks tab
+  benchmark: (question, group_id) => request("/api/benchmark", { method: "POST", json: { question, group_id } }),
 };

@@ -26,7 +26,10 @@ async def live():
         yield store, account, other, lambda name: f"{prefix}-{name}"
     finally:
         async with store.driver.session(database=store.database) as session:
-            result = await session.run("MATCH (n) WHERE n.account IN $accounts DETACH DELETE n", accounts=[account, other])
+            result = await session.run(
+                "MATCH (n) WHERE n.account IN $accounts OR (n:PaperGraphLock AND n.name IN $accounts) DETACH DELETE n",
+                accounts=[account, other],
+            )
             await result.consume()
         await store.close()
 
@@ -62,6 +65,13 @@ async def test_graph_and_neighbors_only_show_selected_papers(live):
     linked = await store.neighbors([doc("a"), doc("b")], [doc("a")])
     assert [(row["seed"], row["doc_id"]) for row in linked] == [(doc("a"), doc("b"))]
     assert await store.neighbors([doc("b")], [doc("a")]) == []
+
+
+async def test_papers_only_link_within_their_account(live):
+    store, account, other, doc = live
+    await add(store, account, doc("mine"), [1.0, 0.0])
+    assert await add(store, other, doc("theirs"), [1.0, 0.0]) == []
+    assert (await store.graph([doc("mine"), doc("theirs")]))["edges"] == []
 
 
 async def test_per_paper_keeps_only_strongest_links(live):

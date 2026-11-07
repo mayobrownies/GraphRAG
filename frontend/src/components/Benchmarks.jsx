@@ -2,17 +2,19 @@ import { useState } from "react";
 import { api } from "../api";
 import Answer from "./Answer.jsx";
 
-export default function Benchmarks({ docs, selected }) {
+// Runs one question through both pipelines over the active group's papers and shows them side by side.
+export default function Benchmarks({ docs, activeGroup }) {
   const [question, setQuestion] = useState("");
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const ready = docs.filter((d) => d.status === "ready").map((d) => d.id);
-  const scope = selected.length ? selected : ready;
+  // Only ready papers of the active group can be searched
+  const members = new Set(activeGroup?.document_ids || []);
+  const readyCount = docs.filter((d) => d.status === "ready" && members.has(d.id)).length;
 
   async function run() {
     setBusy(true); setError(""); setRes(null);
-    try { setRes(await api.benchmark(question, scope)); } catch (e) { setError(e.message); }
+    try { setRes(await api.benchmark(question, activeGroup.id)); } catch (e) { setError(e.message); }
     setBusy(false);
   }
 
@@ -22,10 +24,10 @@ export default function Benchmarks({ docs, selected }) {
         <h2>Benchmarks: Standard RAG vs GraphRAG</h2>
         <textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Enter one question to run through both pipelines" />
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="primary" disabled={busy || question.trim().length < 3 || scope.length === 0} onClick={run}>
+          <button className="primary" disabled={busy || question.trim().length < 3 || readyCount === 0} onClick={run}>
             {busy ? "Running both pipelines..." : "Compare"}
           </button>
-          <span className="muted">{scope.length} document(s) in scope</span>
+          <span className="muted">{readyCount} ready paper(s) in group "{activeGroup?.name}"</span>
         </div>
         {error && <div className="err">{error}</div>}
       </section>
